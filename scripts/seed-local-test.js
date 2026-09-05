@@ -2,6 +2,7 @@ const { createClient } = require('@supabase/supabase-js');
 
 const LOCAL_URL = 'http://127.0.0.1:54321';
 const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0';
+const PUBLISHABLE_KEY = 'sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH';
 const SERVICE_ROLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU';
 
 const admin = createClient(LOCAL_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
@@ -23,10 +24,21 @@ async function seed() {
     if (error) throw error;
   }
 
+  const startRes = await fetch(`${LOCAL_URL}/functions/v1/start-game`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${players[0].accessToken}`, apikey: PUBLISHABLE_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ gameId: game.id }),
+  });
+  const startBody = await startRes.json();
+  if (!startRes.ok) throw new Error(`start-game a échoué: ${JSON.stringify(startBody)}`);
+
+  const { data: dbPlayers } = await admin.from('players').select('id, seat_position, is_sheriff').eq('game_id', game.id);
+
   console.log('gameId:', game.id);
-  players.forEach(p => console.log(`siège ${p.seat} — user_id: ${p.userId}`));
-  console.log('\nToken du joueur au siège 0, pour appeler start-game :');
-  console.log(players[0].accessToken);
+  players.forEach(p => {
+    const dbP = dbPlayers.find(d => d.seat_position === p.seat);
+    console.log(`siège ${p.seat}${dbP.is_sheriff ? ' (Shérif)' : ''} — playerId: ${dbP.id} — token: ${p.accessToken}`);
+  });
 }
 
 seed().catch(console.error);
