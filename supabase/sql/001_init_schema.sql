@@ -76,8 +76,18 @@ grant select on games, players, player_roles, hand_cards, discard_pile, hand_cou
 create policy games_select on games
 for select using (exists (select 1 from players p where p.game_id = games.id and p.user_id = auth.uid()));
 
+create or replace function my_game_ids()
+returns setof uuid
+language sql
+security definer
+set search_path = public
+stable
+as $$
+  select game_id from players where user_id = auth.uid()
+$$;
+
 create policy players_select on players
-for select using (exists (select 1 from players self where self.game_id = players.game_id and self.user_id = auth.uid()));
+for select using (game_id in (select my_game_ids()));
 
 create policy player_roles_select on player_roles
 for select using (

@@ -1,1 +1,1 @@
-insert into hand_cards (player_id, card_type) values ('d0009355-6e79-4b1a-9726-3e77e6656f2c', 'beer');
+update games set current_player_id = '9aad6785-7e88-4ee7-b07b-01c4adc3d62c', turn_phase = 'draw' where id = 'c0feaaef-6ab5-4697-9814-e71e3fea2854';

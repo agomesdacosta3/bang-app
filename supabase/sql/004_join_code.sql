@@ -1,0 +1,1 @@
+alter table games add column join_code text unique;
