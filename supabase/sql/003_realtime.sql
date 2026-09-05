@@ -1,0 +1,1 @@
+alter publication supabase_realtime add table games, players, hand_cards, discard_pile;
