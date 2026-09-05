@@ -1,1 +1,1 @@
-select life_points from players where id = '22fad4a2-9c40-454e-8820-b2928f95d215' limit 100;
+select life_points from players where id in ('ceccd729-fcc5-4939-b183-614ea1d0ac23', 'a08f9d5e-27ef-4b02-88ac-34485621cf11', 'c1c20c7c-2a72-4d47-9bd7-c690d87a8cc6') limit 100;
