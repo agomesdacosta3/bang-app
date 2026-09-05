@@ -1,1 +1,1 @@
-select life_points, is_alive from players where id = '2f562d63-7938-4a33-9749-96fe057e4d3d' ;
+select current_player_id, turn_phase from games where id = '0e73e92b-a387-4db2-9e4a-789166954728' limit 100;
