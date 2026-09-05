@@ -444,3 +444,47 @@ entrypoint = "./functions/join-game/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/join-game/*.html" ]
+
+[functions.play-duel]
+enabled = true
+verify_jwt = false
+import_map = "./functions/play-duel/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/play-duel/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/play-duel/*.html" ]
+
+[functions.respond-duel]
+enabled = true
+verify_jwt = false
+import_map = "./functions/respond-duel/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/respond-duel/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/respond-duel/*.html" ]
+
+[functions.play-indians]
+enabled = true
+verify_jwt = false
+import_map = "./functions/play-indians/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/play-indians/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/play-indians/*.html" ]
+
+[functions.respond-indians]
+enabled = true
+verify_jwt = false
+import_map = "./functions/respond-indians/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/respond-indians/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/respond-indians/*.html" ]

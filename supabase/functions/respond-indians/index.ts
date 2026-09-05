@@ -1,7 +1,6 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
 import { applyDamage } from '../_shared/applyDamage.ts';
-import { clearPending } from '../_shared/pending.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 
 serve(async (req) => {
@@ -11,26 +10,31 @@ serve(async (req) => {
     const { data: { user } } = await supabaseAdmin.auth.getUser(token);
     if (!user) throw new Error('Non authentifié');
 
-    const { gameId, action } = await req.json();
+    const { gameId, action } = await req.json(); // 'discard_bang' | 'accept_damage'
     const { data: game } = await supabaseAdmin.from('games').select('*').eq('id', gameId).single();
-    if (!game || game.pending_type !== 'bang_response') throw new Error('Aucune réponse à un Bang! en attente');
+    if (!game || game.pending_type !== 'indians_response') throw new Error('Aucun Indiens! en attente');
 
     const { data: me } = await supabaseAdmin.from('players').select('*').eq('game_id', gameId).eq('user_id', user.id).single();
     const { data: myPending } = await supabaseAdmin.from('pending_targets').select('*').eq('game_id', gameId).eq('player_id', me!.id).maybeSingle();
-    if (!myPending) throw new Error('Ce n’est pas à vous de répondre');
+    if (!myPending) throw new Error('Vous n’avez pas à répondre à cet Indiens!');
 
-    if (action === 'missed') {
-      const { data: missedCard } = await supabaseAdmin.from('hand_cards').select('id').eq('player_id', me!.id).eq('card_type', 'missed').limit(1).single();
-      if (!missedCard) throw new Error('Vous n’avez pas de carte Raté!');
-      await supabaseAdmin.from('hand_cards').delete().eq('id', missedCard.id);
-      await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'missed' });
+    if (action === 'discard_bang') {
+      const { data: bangCard } = await supabaseAdmin.from('hand_cards').select('id').eq('player_id', me!.id).eq('card_type', 'bang').limit(1).single();
+      if (!bangCard) throw new Error('Vous n’avez pas de carte Bang!');
+      await supabaseAdmin.from('hand_cards').delete().eq('id', bangCard.id);
+      await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'bang' });
     } else if (action === 'accept_damage') {
       await applyDamage(gameId, me!.id);
     } else {
       throw new Error('Action inconnue');
     }
 
-    await clearPending(gameId);
+    await supabaseAdmin.from('pending_targets').delete().eq('id', myPending.id);
+    const { data: remaining } = await supabaseAdmin.from('pending_targets').select('id').eq('game_id', gameId);
+    if (!remaining || remaining.length === 0) {
+      await supabaseAdmin.from('games').update({ pending_type: null, pending_initiator_id: null, pending_expires_at: null }).eq('id', gameId);
+    }
+
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {
     return new Response(JSON.stringify({ error: err.message }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

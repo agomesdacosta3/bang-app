@@ -1,1 +1,1 @@
-update games set current_player_id = '9aad6785-7e88-4ee7-b07b-01c4adc3d62c', turn_phase = 'draw' where id = 'c0feaaef-6ab5-4697-9814-e71e3fea2854';
+select life_points from players where id = '22fad4a2-9c40-454e-8820-b2928f95d215' limit 100;

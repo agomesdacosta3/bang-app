@@ -1,8 +1,7 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
-import { computeDistance } from '../_shared/distance.ts';
-import { corsHeaders } from '../_shared/cors.ts';
 import { startPending } from '../_shared/pending.ts';
+import { corsHeaders } from '../_shared/cors.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -20,20 +19,24 @@ serve(async (req) => {
     const me = players!.find(p => p.user_id === user.id);
     if (!me) throw new Error('Vous ne participez pas à cette partie');
     if (game.current_player_id !== me.id) throw new Error('Ce n’est pas votre tour');
-    if (me.has_played_bang_this_turn) throw new Error('Une seule carte Bang! par tour');
 
     const target = players!.find(p => p.id === targetPlayerId);
-    if (!target?.is_alive) throw new Error('Cible invalide');
-    if (computeDistance(players!, me.id, target.id) > 1) throw new Error('Hors de portée (Colt .45 = distance 1)');
+    if (!target?.is_alive || target.id === me.id) throw new Error('Cible invalide');
+    // Pas de vérification de distance : le Duel peut viser n'importe qui
 
-    const { data: bangCard } = await supabaseAdmin.from('hand_cards').select('id').eq('player_id', me.id).eq('card_type', 'bang').limit(1).single();
-    if (!bangCard) throw new Error('Vous n’avez pas de carte Bang! en main');
+    const { data: duelCard } = await supabaseAdmin.from('hand_cards').select('id').eq('player_id', me.id).eq('card_type', 'duel').limit(1).single();
+    if (!duelCard) throw new Error('Vous n’avez pas de carte Duel en main');
 
-    await supabaseAdmin.from('hand_cards').delete().eq('id', bangCard.id);
-    await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'bang' });
-    await supabaseAdmin.from('players').update({ has_played_bang_this_turn: true }).eq('id', me.id);
-    await startPending(gameId, me.id, 'bang_response', [{ playerId: target.id, isCurrentTurn: true }]);
+    await supabaseAdmin.from('hand_cards').delete().eq('id', duelCard.id);
+    await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'duel' });
+
+    await startPending(gameId, me.id, 'duel_response', [
+      { playerId: target.id, isCurrentTurn: true },
+      { playerId: me.id, isCurrentTurn: false },
+    ]);
 
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  } catch (err) {
+    return new Response(JSON.stringify({ error: err.message }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 });
