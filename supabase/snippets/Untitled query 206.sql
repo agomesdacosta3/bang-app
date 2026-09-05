@@ -1,1 +1,1 @@
-select current_player_id, turn_phase from games where id = '0e73e92b-a387-4db2-9e4a-789166954728' limit 100;
+insert into hand_cards (player_id, card_type) values ('d0009355-6e79-4b1a-9726-3e77e6656f2c', 'beer');
