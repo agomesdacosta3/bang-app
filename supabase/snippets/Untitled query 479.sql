@@ -1,0 +1,1 @@
+alter table pending_targets add column barrel_tried boolean not null default false;

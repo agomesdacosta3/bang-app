@@ -10,16 +10,26 @@ type Game = {
 };
 type Player = SeatedPlayer & { is_sheriff: boolean; life_points: number; max_life_points: number };
 type HandCard = { id: string; card_type: string };
+type Equipment = { player_id: string; card_type: string };
 
-const CARD_LABELS: Record<string, string> = { bang: 'Bang!', missed: 'Raté!', beer: 'Bière', duel: 'Duel', indians: 'Indiens!' };
+const CARD_LABELS: Record<string, string> = {
+  bang: 'Bang!', missed: 'Raté!', beer: 'Bière', duel: 'Duel', indians: 'Indiens!',
+  prison: 'Prison', dynamite: 'Dynamite', barrel: 'Planque',
+};
+const EQUIPMENT_TAGS: Record<string, string> = { prison: '🔒', dynamite: '💣', barrel: '🛢️' };
+const ROLE_LABELS: Record<string, string> = { sheriff: 'Shérif', deputy: 'Adjoint', outlaw: 'Hors-la-loi', renegade: 'Renégat' };
+const SUIT_LABELS: Record<string, string> = { hearts: 'Cœur', diamonds: 'Carreau', clubs: 'Trèfle', spades: 'Pique' };
 
 export default function GameScreen({ gameId, playerId, onLeave }: { gameId: string; playerId: string; onLeave: () => void }) {
   const [game, setGame] = useState<Game | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [hand, setHand] = useState<HandCard[]>([]);
-  const [myPendingRow, setMyPendingRow] = useState<{ is_current_turn: boolean } | null>(null);
+  const [equipment, setEquipment] = useState<Equipment[]>([]);
+  const [rolesMap, setRolesMap] = useState<Record<string, string>>({});
+  const [myPendingRow, setMyPendingRow] = useState<{ is_current_turn: boolean; barrel_tried: boolean } | null>(null);
   const [targetPickerFor, setTargetPickerFor] = useState<string | null>(null);
   const [duelTargetPickerFor, setDuelTargetPickerFor] = useState<string | null>(null);
+  const [prisonTargetPickerFor, setPrisonTargetPickerFor] = useState<string | null>(null);
   const [discarding, setDiscarding] = useState(false);
   const [selectedDiscards, setSelectedDiscards] = useState<string[]>([]);
   const [actionLoading, setActionLoading] = useState(false);
@@ -35,11 +45,21 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     const { data: g } = await supabase.from('games').select('*').eq('id', gameId).single();
     const { data: p } = await supabase.from('players').select('*').eq('game_id', gameId).order('seat_position');
     const { data: h } = await supabase.from('hand_cards').select('id, card_type').eq('player_id', playerId);
-    const { data: pending } = await supabase.from('pending_targets').select('is_current_turn').eq('game_id', gameId).eq('player_id', playerId).maybeSingle();
+    const { data: pending } = await supabase.from('pending_targets').select('is_current_turn, barrel_tried').eq('game_id', gameId).eq('player_id', playerId).maybeSingle();
+    const { data: eq } = p?.length ? await supabase.from('cards_in_play').select('player_id, card_type').in('player_id', p.map(pl => pl.id)) : { data: [] };
+
+    const eliminatedIds = (p ?? []).filter(pl => !pl.is_alive).map(pl => pl.id);
+    const idsForRoles = Array.from(new Set([...eliminatedIds, playerId]));
+    const { data: roles } = await supabase.from('player_roles').select('player_id, role').in('player_id', idsForRoles);
+    const map: Record<string, string> = {};
+    (roles ?? []).forEach(r => { map[r.player_id] = r.role; });
+
     if (g) setGame(g);
     if (p) setPlayers(p);
     if (h) setHand(h);
     setMyPendingRow(pending ?? null);
+    setEquipment(eq ?? []);
+    setRolesMap(map);
     setLastSync(new Date().toLocaleTimeString());
   }
 
@@ -51,6 +71,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
       .on('postgres_changes', { event: '*', schema: 'public', table: 'players', filter: `game_id=eq.${gameId}` }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hand_cards', filter: `player_id=eq.${playerId}` }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pending_targets', filter: `game_id=eq.${gameId}` }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'cards_in_play' }, loadAll)
       .subscribe((status) => setChannelStatus(status));
     return () => { supabase.removeChannel(channel); };
   }, [gameId, playerId]);
@@ -83,7 +104,29 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     return runAction(() => callFunction('play-duel', { gameId, targetPlayerId }));
   };
   const handlePlayIndians = () => runAction(() => callFunction('play-indians', { gameId }));
+  const handlePlayPrison = (targetPlayerId: string) => {
+    setPrisonTargetPickerFor(null);
+    return runAction(() => callFunction('play-prison', { gameId, targetPlayerId }));
+  };
+  const handlePlayDynamite = () => runAction(() => callFunction('play-dynamite', { gameId }));
+  const handlePlayBarrel = () => runAction(() => callFunction('play-barrel', { gameId }));
   const handleRespond = (action: 'missed' | 'accept_damage') => runAction(() => callFunction('respond-bang', { gameId, action }));
+
+  async function handleTryBarrel() {
+    if (actionLoading) return;
+    setActionLoading(true);
+    try {
+      const result = await callFunction('respond-bang', { gameId, action: 'try_barrel' });
+      if (result?.barrelWorked === false) {
+        Alert.alert('Planque ratée', `Carte tirée : ${SUIT_LABELS[result.drawnSuit] ?? result.drawnSuit}. Choisissez une autre réponse.`);
+      }
+    } catch (err: any) {
+      Alert.alert('Erreur', err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
   const handleRespondDuel = (action: 'discard_bang' | 'accept_damage') => runAction(() => callFunction('respond-duel', { gameId, action }));
   const handleRespondIndians = (action: 'discard_bang' | 'accept_damage') => runAction(() => callFunction('respond-indians', { gameId, action }));
 
@@ -117,12 +160,17 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     );
   }
 
+  const myRole = me.is_sheriff ? 'sheriff' : rolesMap[playerId];
+  const myEquipmentTypes = equipment.filter(e => e.player_id === playerId).map(e => e.card_type);
   const excess = hand.length - me.life_points;
   const aliveCount = players.filter(p => p.is_alive).length;
   const hasMissed = hand.some(c => c.card_type === 'missed');
   const hasBang = hand.some(c => c.card_type === 'bang');
+  const hasBarrelInPlay = myEquipmentTypes.includes('barrel');
+  const canTryBarrel = hasBarrelInPlay && !myPendingRow?.barrel_tried;
   const targets = players.filter(p => p.is_alive && p.id !== playerId && computeDistance(players, playerId, p.id) <= 1);
   const duelTargets = players.filter(p => p.is_alive && p.id !== playerId);
+  const prisonTargets = players.filter(p => p.is_alive && p.id !== playerId && !p.is_sheriff && !equipment.some(e => e.player_id === p.id && e.card_type === 'prison'));
 
   const canDraw = isMyTurn && !hasPending && game.turn_phase === 'draw';
   const canAct = isMyTurn && !hasPending && game.turn_phase === 'play' && !discarding;
@@ -130,6 +178,9 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const canPlayBeer = canAct && aliveCount > 2 && me.life_points < me.max_life_points;
   const canPlayDuel = canAct && duelTargets.length > 0;
   const canPlayIndians = canAct;
+  const canPlayPrison = canAct && prisonTargets.length > 0;
+  const canPlayDynamite = canAct && !myEquipmentTypes.includes('dynamite');
+  const canPlayBarrel = canAct && !hasBarrelInPlay;
 
   const mustRespondToBang = myPendingRow && game.pending_type === 'bang_response';
   const mustRespondToDuel = myPendingRow?.is_current_turn && game.pending_type === 'duel_response';
@@ -138,7 +189,8 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Vie : {me.life_points}/{me.max_life_points}{me.is_sheriff ? ' 🎖️ Shérif' : ''}</Text>
+      <Text style={styles.title}>Vie : {me.life_points}/{me.max_life_points}{me.is_sheriff ? ' 🎖️' : ''}</Text>
+      <Text style={styles.subtitle}>Votre rôle : {ROLE_LABELS[myRole] ?? '...'}</Text>
       <Text style={styles.hint}>Dernière synchro : {lastSync || '—'}</Text>
       <Text style={styles.hint}>Canal : {channelStatus}</Text>
 
@@ -146,6 +198,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
         <View style={styles.pendingBox}>
           <Text style={styles.pendingTitle}>Vous êtes visé par un Bang! Répondez :</Text>
           {hasMissed && <Button title="Jouer Raté!" onPress={() => handleRespond('missed')} disabled={actionLoading} />}
+          {canTryBarrel && <Button title="Essayer la Planque" onPress={handleTryBarrel} disabled={actionLoading} />}
           <View style={styles.spacer} />
           <Button title="Encaisser les dégâts" color="#a33" onPress={() => handleRespond('accept_damage')} disabled={actionLoading} />
         </View>
@@ -183,18 +236,13 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
           renderItem={({ item }) => (
             <View style={styles.cardRow}>
               <Text style={styles.cardLabel}>{CARD_LABELS[item.card_type] ?? item.card_type}</Text>
-              {item.card_type === 'bang' && canPlayBang && (
-                <Button title="Jouer" onPress={() => setTargetPickerFor(item.id)} disabled={actionLoading} />
-              )}
-              {item.card_type === 'beer' && canPlayBeer && (
-                <Button title="Jouer" onPress={handlePlayBeer} disabled={actionLoading} />
-              )}
-              {item.card_type === 'duel' && canPlayDuel && (
-                <Button title="Jouer" onPress={() => setDuelTargetPickerFor(item.id)} disabled={actionLoading} />
-              )}
-              {item.card_type === 'indians' && canPlayIndians && (
-                <Button title="Jouer" onPress={handlePlayIndians} disabled={actionLoading} />
-              )}
+              {item.card_type === 'bang' && canPlayBang && <Button title="Jouer" onPress={() => setTargetPickerFor(item.id)} disabled={actionLoading} />}
+              {item.card_type === 'beer' && canPlayBeer && <Button title="Jouer" onPress={handlePlayBeer} disabled={actionLoading} />}
+              {item.card_type === 'duel' && canPlayDuel && <Button title="Jouer" onPress={() => setDuelTargetPickerFor(item.id)} disabled={actionLoading} />}
+              {item.card_type === 'indians' && canPlayIndians && <Button title="Jouer" onPress={handlePlayIndians} disabled={actionLoading} />}
+              {item.card_type === 'prison' && canPlayPrison && <Button title="Jouer" onPress={() => setPrisonTargetPickerFor(item.id)} disabled={actionLoading} />}
+              {item.card_type === 'dynamite' && canPlayDynamite && <Button title="Jouer" onPress={handlePlayDynamite} disabled={actionLoading} />}
+              {item.card_type === 'barrel' && canPlayBarrel && <Button title="Jouer" onPress={handlePlayBarrel} disabled={actionLoading} />}
             </View>
           )}
           ListEmptyComponent={<Text style={styles.hint}>Main vide</Text>}
@@ -216,6 +264,8 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
             )}
           />
           <Button title="Confirmer la défausse" onPress={handleConfirmEndTurn} disabled={actionLoading} />
+          <View style={styles.spacer} />
+          <Button title="Annuler" color="#999" onPress={() => { setDiscarding(false); setSelectedDiscards([]); }} disabled={actionLoading} />
         </>
       )}
 
@@ -229,20 +279,23 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
       <FlatList
         data={players}
         keyExtractor={p => p.id}
-        renderItem={({ item }) => (
-          <Text style={styles.playerRow}>
-            Siège {item.seat_position}{item.is_sheriff ? ' 🎖️' : ''} — {item.is_alive ? `${item.life_points} PV` : 'éliminé'}{item.id === playerId ? ' (vous)' : ''}
-          </Text>
-        )}
+        renderItem={({ item }) => {
+          const tags = equipment.filter(e => e.player_id === item.id).map(e => EQUIPMENT_TAGS[e.card_type]).join(' ');
+          const role = item.is_sheriff ? 'sheriff' : rolesMap[item.id];
+          const roleLabel = !item.is_alive && role ? ` — ${ROLE_LABELS[role] ?? role}` : '';
+          return (
+            <Text style={styles.playerRow}>
+              Siège {item.seat_position}{item.is_sheriff ? ' 🎖️' : ''} — {item.is_alive ? `${item.life_points} PV` : 'éliminé' + roleLabel}{item.id === playerId ? ' (vous)' : ''} {tags}
+            </Text>
+          );
+        }}
       />
 
       <Modal visible={!!targetPickerFor} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
             <Text style={styles.subtitle}>Choisir une cible (portée 1) :</Text>
-            {targets.map(t => (
-              <Button key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayBang(t.id)} />
-            ))}
+            {targets.map(t => <Button key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayBang(t.id)} />)}
             <View style={styles.spacer} />
             <Button title="Annuler" color="#999" onPress={() => setTargetPickerFor(null)} />
           </View>
@@ -253,11 +306,20 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
             <Text style={styles.subtitle}>Choisir une cible pour le Duel :</Text>
-            {duelTargets.map(t => (
-              <Button key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayDuel(t.id)} />
-            ))}
+            {duelTargets.map(t => <Button key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayDuel(t.id)} />)}
             <View style={styles.spacer} />
             <Button title="Annuler" color="#999" onPress={() => setDuelTargetPickerFor(null)} />
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={!!prisonTargetPickerFor} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.subtitle}>Choisir une cible pour Prison :</Text>
+            {prisonTargets.map(t => <Button key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayPrison(t.id)} />)}
+            <View style={styles.spacer} />
+            <Button title="Annuler" color="#999" onPress={() => setPrisonTargetPickerFor(null)} />
           </View>
         </View>
       </Modal>

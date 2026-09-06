@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
 import { applyDamage } from '../_shared/applyDamage.ts';
 import { clearPending } from '../_shared/pending.ts';
+import { degainer } from '../_shared/degainer.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 
 serve(async (req) => {
@@ -11,7 +12,7 @@ serve(async (req) => {
     const { data: { user } } = await supabaseAdmin.auth.getUser(token);
     if (!user) throw new Error('Non authentifié');
 
-    const { gameId, action } = await req.json();
+    const { gameId, action } = await req.json(); // 'missed' | 'accept_damage' | 'try_barrel'
     const { data: game } = await supabaseAdmin.from('games').select('*').eq('id', gameId).single();
     if (!game || game.pending_type !== 'bang_response') throw new Error('Aucune réponse à un Bang! en attente');
 
@@ -24,13 +25,26 @@ serve(async (req) => {
       if (!missedCard) throw new Error('Vous n’avez pas de carte Raté!');
       await supabaseAdmin.from('hand_cards').delete().eq('id', missedCard.id);
       await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'missed', suit: missedCard.suit, value: missedCard.value });
+      await clearPending(gameId);
+    } else if (action === 'try_barrel') {
+      if (myPending.barrel_tried) throw new Error('Vous avez déjà essayé la Planque pour ce tir');
+      const { data: barrel } = await supabaseAdmin.from('cards_in_play').select('id').eq('player_id', me!.id).eq('card_type', 'barrel').maybeSingle();
+      if (!barrel) throw new Error('Vous n’avez pas de Planque en jeu');
+
+      await supabaseAdmin.from('pending_targets').update({ barrel_tried: true }).eq('id', myPending.id);
+      const drawn = await degainer(gameId);
+
+      if (drawn.suit !== 'hearts') {
+        return new Response(JSON.stringify({ ok: true, barrelWorked: false, drawnSuit: drawn.suit }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+      }
+      await clearPending(gameId);
     } else if (action === 'accept_damage') {
       await applyDamage(gameId, me!.id);
+      await clearPending(gameId);
     } else {
       throw new Error('Action inconnue');
     }
 
-    await clearPending(gameId);
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {
     return new Response(JSON.stringify({ error: err.message }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

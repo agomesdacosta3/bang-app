@@ -1,9 +1,9 @@
 import { supabaseAdmin } from './supabaseAdmin.ts';
 import { checkVictory } from './victory.ts';
 
-export async function applyDamage(gameId: string, playerId: string) {
+export async function applyDamage(gameId: string, playerId: string, amount = 1) {
   const { data: player } = await supabaseAdmin.from('players').select('life_points').eq('id', playerId).single();
-  const newLife = player!.life_points - 1;
+  const newLife = player!.life_points - amount;
   const eliminated = newLife <= 0;
   await supabaseAdmin.from('players').update({ life_points: Math.max(newLife, 0), is_alive: !eliminated }).eq('id', playerId);
   if (eliminated) {

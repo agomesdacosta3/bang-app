@@ -1,1 +1,1 @@
-select card_type, suit, value from hand_cards order by created_at desc limit 10;
+insert into hand_cards (player_id, card_type, suit, value) values ('954c2046-7be6-49c1-9684-1bf6499d5ae0', 'dynamite', 'hearts', 5);

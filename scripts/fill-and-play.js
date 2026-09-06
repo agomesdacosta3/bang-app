@@ -58,7 +58,11 @@ async function respondIfPending(bot, gameId) {
 }
 
 async function passTurn(bot, gameId, bots) {
-  await call('draw-cards', bot.token, { gameId });
+  const drawResult = await call('draw-cards', bot.token, { gameId });
+  if (drawResult.skippedTurn || drawResult.eliminatedByDynamite) {
+    console.log(`  → siège ${bot.seat} a vu son tour écourté (Prison/Dynamite)`);
+    return;
+  }
 
   const { data: allPlayers } = await bot.client.from('players').select('id, seat_position, is_alive').eq('game_id', gameId);
   const { data: hand } = await bot.client.from('hand_cards').select('id, card_type').eq('player_id', bot.playerId);

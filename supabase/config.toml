@@ -488,3 +488,36 @@ entrypoint = "./functions/respond-indians/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/respond-indians/*.html" ]
+
+[functions.play-prison]
+enabled = true
+verify_jwt = false
+import_map = "./functions/play-prison/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/play-prison/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/play-prison/*.html" ]
+
+[functions.play-dynamite]
+enabled = true
+verify_jwt = false
+import_map = "./functions/play-dynamite/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/play-dynamite/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/play-dynamite/*.html" ]
+
+[functions.play-barrel]
+enabled = true
+verify_jwt = false
+import_map = "./functions/play-barrel/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/play-barrel/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/play-barrel/*.html" ]

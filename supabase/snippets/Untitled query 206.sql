@@ -1,1 +1,2 @@
-select id from players where game_id = 'GAMEID' and seat_position = 0 limit 100;
+select id from games where join_code = 'AJ5AB6y' limit 100;
+

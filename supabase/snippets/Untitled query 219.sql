@@ -1,1 +1,1 @@
-select * from players;
+select * from players where seat_position = 0 order by joined_at desc ;
