@@ -35,5 +35,7 @@ serve(async (req) => {
     await startPending(gameId, me.id, 'bang_response', [{ playerId: target.id, isCurrentTurn: true }]);
 
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+  } catch (err) {
+    return new Response(JSON.stringify({ error: err.message }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
 });
