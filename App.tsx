@@ -28,7 +28,15 @@ export default function App() {
   }
 
   if (gameState && gameStarted) {
-    return <SafeAreaView style={styles.flexFill}><GameScreen gameId={gameState.gameId} playerId={gameState.playerId} /></SafeAreaView>;
+    return (
+      <SafeAreaView style={styles.flexFill}>
+        <GameScreen
+          gameId={gameState.gameId}
+          playerId={gameState.playerId}
+          onLeave={() => { setGameState(null); setGameStarted(false); }}
+        />
+      </SafeAreaView>
+    );
   }
 
   if (gameState) {

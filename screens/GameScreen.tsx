@@ -13,12 +13,13 @@ type HandCard = { id: string; card_type: string };
 
 const CARD_LABELS: Record<string, string> = { bang: 'Bang!', missed: 'Raté!', beer: 'Bière', duel: 'Duel', indians: 'Indiens!' };
 
-export default function GameScreen({ gameId, playerId }: { gameId: string; playerId: string }) {
+export default function GameScreen({ gameId, playerId, onLeave }: { gameId: string; playerId: string; onLeave: () => void }) {
   const [game, setGame] = useState<Game | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [hand, setHand] = useState<HandCard[]>([]);
   const [myPendingRow, setMyPendingRow] = useState<{ is_current_turn: boolean } | null>(null);
   const [targetPickerFor, setTargetPickerFor] = useState<string | null>(null);
+  const [duelTargetPickerFor, setDuelTargetPickerFor] = useState<string | null>(null);
   const [discarding, setDiscarding] = useState(false);
   const [selectedDiscards, setSelectedDiscards] = useState<string[]>([]);
   const [actionLoading, setActionLoading] = useState(false);
@@ -77,7 +78,14 @@ export default function GameScreen({ gameId, playerId }: { gameId: string; playe
     setTargetPickerFor(null);
     return runAction(() => callFunction('play-bang', { gameId, targetPlayerId }));
   };
+  const handlePlayDuel = (targetPlayerId: string) => {
+    setDuelTargetPickerFor(null);
+    return runAction(() => callFunction('play-duel', { gameId, targetPlayerId }));
+  };
+  const handlePlayIndians = () => runAction(() => callFunction('play-indians', { gameId }));
   const handleRespond = (action: 'missed' | 'accept_damage') => runAction(() => callFunction('respond-bang', { gameId, action }));
+  const handleRespondDuel = (action: 'discard_bang' | 'accept_damage') => runAction(() => callFunction('respond-duel', { gameId, action }));
+  const handleRespondIndians = (action: 'discard_bang' | 'accept_damage') => runAction(() => callFunction('respond-indians', { gameId, action }));
 
   function toggleDiscardSelection(cardId: string) {
     setSelectedDiscards(prev => prev.includes(cardId) ? prev.filter(id => id !== cardId) : [...prev, cardId]);
@@ -103,20 +111,30 @@ export default function GameScreen({ gameId, playerId }: { gameId: string; playe
       <View style={styles.container}>
         <Text style={styles.title}>Partie terminée</Text>
         <Text style={styles.subtitle}>Camp vainqueur : {game.winner_team}</Text>
+        <View style={styles.spacer} />
+        <Button title="Retour à l'accueil" onPress={onLeave} />
       </View>
     );
   }
 
   const excess = hand.length - me.life_points;
   const aliveCount = players.filter(p => p.is_alive).length;
+  const hasMissed = hand.some(c => c.card_type === 'missed');
+  const hasBang = hand.some(c => c.card_type === 'bang');
   const targets = players.filter(p => p.is_alive && p.id !== playerId && computeDistance(players, playerId, p.id) <= 1);
+  const duelTargets = players.filter(p => p.is_alive && p.id !== playerId);
 
   const canDraw = isMyTurn && !hasPending && game.turn_phase === 'draw';
   const canAct = isMyTurn && !hasPending && game.turn_phase === 'play' && !discarding;
   const canPlayBang = canAct && targets.length > 0;
   const canPlayBeer = canAct && aliveCount > 2 && me.life_points < me.max_life_points;
+  const canPlayDuel = canAct && duelTargets.length > 0;
+  const canPlayIndians = canAct;
+
   const mustRespondToBang = myPendingRow && game.pending_type === 'bang_response';
-  const hasMissed = hand.some(c => c.card_type === 'missed');
+  const mustRespondToDuel = myPendingRow?.is_current_turn && game.pending_type === 'duel_response';
+  const mustRespondToIndians = myPendingRow && game.pending_type === 'indians_response';
+  const waitingOnOthers = hasPending && !mustRespondToBang && !mustRespondToDuel && !mustRespondToIndians;
 
   return (
     <View style={styles.container}>
@@ -133,9 +151,25 @@ export default function GameScreen({ gameId, playerId }: { gameId: string; playe
         </View>
       )}
 
-      {!mustRespondToBang && hasPending && (
-        <Text style={styles.pendingTitle}>En attente ({game.pending_type})...</Text>
+      {mustRespondToDuel && (
+        <View style={styles.pendingBox}>
+          <Text style={styles.pendingTitle}>Duel ! Continuez ou encaissez :</Text>
+          {hasBang && <Button title="Jouer Bang!" onPress={() => handleRespondDuel('discard_bang')} disabled={actionLoading} />}
+          <View style={styles.spacer} />
+          <Button title="Encaisser les dégâts" color="#a33" onPress={() => handleRespondDuel('accept_damage')} disabled={actionLoading} />
+        </View>
       )}
+
+      {mustRespondToIndians && (
+        <View style={styles.pendingBox}>
+          <Text style={styles.pendingTitle}>Indiens! Défendez-vous ou encaissez :</Text>
+          {hasBang && <Button title="Jouer Bang!" onPress={() => handleRespondIndians('discard_bang')} disabled={actionLoading} />}
+          <View style={styles.spacer} />
+          <Button title="Encaisser les dégâts" color="#a33" onPress={() => handleRespondIndians('accept_damage')} disabled={actionLoading} />
+        </View>
+      )}
+
+      {waitingOnOthers && <Text style={styles.pendingTitle}>En attente ({game.pending_type})...</Text>}
 
       {!hasPending && !isMyTurn && (
         <Text style={styles.subtitle}>En attente du joueur au siège {players.find(p => p.id === game.current_player_id)?.seat_position}...</Text>
@@ -154,6 +188,12 @@ export default function GameScreen({ gameId, playerId }: { gameId: string; playe
               )}
               {item.card_type === 'beer' && canPlayBeer && (
                 <Button title="Jouer" onPress={handlePlayBeer} disabled={actionLoading} />
+              )}
+              {item.card_type === 'duel' && canPlayDuel && (
+                <Button title="Jouer" onPress={() => setDuelTargetPickerFor(item.id)} disabled={actionLoading} />
+              )}
+              {item.card_type === 'indians' && canPlayIndians && (
+                <Button title="Jouer" onPress={handlePlayIndians} disabled={actionLoading} />
               )}
             </View>
           )}
@@ -205,6 +245,19 @@ export default function GameScreen({ gameId, playerId }: { gameId: string; playe
             ))}
             <View style={styles.spacer} />
             <Button title="Annuler" color="#999" onPress={() => setTargetPickerFor(null)} />
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={!!duelTargetPickerFor} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.subtitle}>Choisir une cible pour le Duel :</Text>
+            {duelTargets.map(t => (
+              <Button key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayDuel(t.id)} />
+            ))}
+            <View style={styles.spacer} />
+            <Button title="Annuler" color="#999" onPress={() => setDuelTargetPickerFor(null)} />
           </View>
         </View>
       </Modal>

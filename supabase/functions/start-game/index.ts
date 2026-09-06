@@ -17,7 +17,13 @@ function shuffle<T>(arr: T[]): T[] {
 }
 
 function buildDeck(): string[] {
-  return shuffle([...Array(20).fill('bang'), ...Array(10).fill('missed'), ...Array(6).fill('beer')]);
+  return shuffle([
+    ...Array(20).fill('bang'),
+    ...Array(10).fill('missed'),
+    ...Array(6).fill('beer'),
+    ...Array(3).fill('duel'),
+    ...Array(2).fill('indians'),
+  ]);
 }
 
 serve(async (req) => {

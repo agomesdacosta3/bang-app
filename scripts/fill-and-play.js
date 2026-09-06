@@ -37,19 +37,23 @@ function computeDistance(players, fromId, toId) {
   return Math.min((toIndex - fromIndex + n) % n, (fromIndex - toIndex + n) % n);
 }
 
-// Fait répondre le bot s'il est bien la cible d'un Bang! en attente. Retourne true si une réponse a été envoyée.
+// Gère Bang!, Duel et Indiens! de façon générique. Retourne true si une réponse a été envoyée.
 async function respondIfPending(bot, gameId) {
   const { data: game } = await bot.client.from('games').select('pending_type').eq('id', gameId).single();
-  if (game.pending_type !== 'bang_response') return false;
+  if (!game.pending_type) return false;
 
-  const { data: myPending } = await bot.client.from('pending_targets').select('id').eq('game_id', gameId).eq('player_id', bot.playerId).maybeSingle();
+  const { data: myPending } = await bot.client.from('pending_targets').select('is_current_turn').eq('game_id', gameId).eq('player_id', bot.playerId).maybeSingle();
   if (!myPending) return false;
+  if (game.pending_type === 'duel_response' && !myPending.is_current_turn) return false; // pas encore son tour dans le duel
 
-  const { data: hand } = await bot.client.from('hand_cards').select('id, card_type').eq('player_id', bot.playerId);
-  const hasMissed = hand.some(c => c.card_type === 'missed');
-  const action = hasMissed ? 'missed' : 'accept_damage';
-  console.log(`  → siège ${bot.seat} répond au Bang! (${action})`);
-  await call('respond-bang', bot.token, { gameId, action });
+  const { data: hand } = await bot.client.from('hand_cards').select('card_type').eq('player_id', bot.playerId);
+  const defendCardType = game.pending_type === 'bang_response' ? 'missed' : 'bang';
+  const canDefend = hand.some(c => c.card_type === defendCardType);
+  const action = canDefend ? (game.pending_type === 'bang_response' ? 'missed' : 'discard_bang') : 'accept_damage';
+  const fnName = game.pending_type === 'bang_response' ? 'respond-bang' : game.pending_type === 'duel_response' ? 'respond-duel' : 'respond-indians';
+
+  console.log(`  → siège ${bot.seat} répond à ${game.pending_type} (${action})`);
+  await call(fnName, bot.token, { gameId, action });
   return true;
 }
 
@@ -69,10 +73,8 @@ async function passTurn(bot, gameId, bots) {
 
       const targetBot = bots.find(b => b.playerId === target.id);
       if (targetBot) {
-        // La cible est un bot qu'on contrôle : elle répond tout de suite, pas besoin d'attendre
         await respondIfPending(targetBot, gameId);
       } else {
-        // La cible est le téléphone : on attend sa réponse, avec un filet de sécurité au bout de 25s
         for (let i = 0; i < 30; i++) {
           await new Promise(r => setTimeout(r, 1000));
           const { data: g } = await bot.client.from('games').select('pending_type').eq('id', gameId).single();
@@ -108,8 +110,7 @@ async function run() {
     const { data: game } = await bots[0].client.from('games').select('current_player_id, status, pending_type').eq('id', gameId).single();
     if (game.status === 'finished') { console.log('Partie terminée.'); return; }
 
-    if (game.pending_type === 'bang_response') {
-      // Le téléphone (ou un autre bot déjà traité) a visé un bot pendant qu'on n'était pas dans passTurn — on répond quand même
+    if (['bang_response', 'duel_response', 'indians_response'].includes(game.pending_type)) {
       const { data: pendingRows } = await bots[0].client.from('pending_targets').select('player_id');
       for (const row of pendingRows ?? []) {
         const bot = bots.find(b => b.playerId === row.player_id);
