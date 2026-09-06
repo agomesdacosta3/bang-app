@@ -1,1 +1,10 @@
-select life_points from players where id in ('ceccd729-fcc5-4939-b183-614ea1d0ac23', 'a08f9d5e-27ef-4b02-88ac-34485621cf11', 'c1c20c7c-2a72-4d47-9bd7-c690d87a8cc6') limit 100;
+do $$
+declare
+  t text;
+begin
+  foreach t in array array['games', 'players', 'hand_cards', 'discard_pile', 'pending_targets'] loop
+    if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and tablename = t) then
+      execute format('alter publication supabase_realtime add table %I', t);
+    end if;
+  end loop;
+end $$;
