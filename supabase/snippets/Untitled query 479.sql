@@ -1,1 +1,1 @@
-alter table pending_targets add column barrel_tried boolean not null default false;
+select id, join_code, status, created_at from games order by created_at desc limit 5;

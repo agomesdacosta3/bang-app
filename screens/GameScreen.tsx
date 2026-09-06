@@ -35,7 +35,8 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const [actionLoading, setActionLoading] = useState(false);
   const [lastSync, setLastSync] = useState('');
   const [channelStatus, setChannelStatus] = useState('(pas encore connecté)');
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
+  const firedTimeoutRef = useRef(false);
 
   const me = players.find(p => p.id === playerId);
   const isMyTurn = game?.current_player_id === playerId;
@@ -76,16 +77,25 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     return () => { supabase.removeChannel(channel); };
   }, [gameId, playerId]);
 
+  // Compteur visible + déclenchement automatique du timeout, revérifié chaque seconde
   useEffect(() => {
-    if (timeoutRef.current) clearTimeout(timeoutRef.current);
-    if (game?.pending_expires_at) {
-      const delay = new Date(game.pending_expires_at).getTime() - Date.now();
-      timeoutRef.current = setTimeout(() => {
+    firedTimeoutRef.current = false;
+    if (!game?.pending_expires_at) { setSecondsLeft(null); return; }
+    const expiresAt = new Date(game.pending_expires_at).getTime();
+
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+      setSecondsLeft(remaining);
+      if (remaining <= 0 && !firedTimeoutRef.current) {
+        firedTimeoutRef.current = true;
         supabase.functions.invoke('resolve-timeout', { body: { gameId } }).catch(() => {});
-      }, Math.max(delay, 0));
-    }
-    return () => { if (timeoutRef.current) clearTimeout(timeoutRef.current); };
-  }, [game?.pending_expires_at]);
+      }
+    };
+
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [game?.pending_expires_at, gameId]);
 
   async function runAction(action: () => Promise<void>) {
     if (actionLoading) return;
@@ -187,6 +197,8 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const mustRespondToIndians = myPendingRow && game.pending_type === 'indians_response';
   const waitingOnOthers = hasPending && !mustRespondToBang && !mustRespondToDuel && !mustRespondToIndians;
 
+  const timerLabel = secondsLeft !== null ? `⏱ ${secondsLeft}s` : '';
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Vie : {me.life_points}/{me.max_life_points}{me.is_sheriff ? ' 🎖️' : ''}</Text>
@@ -196,7 +208,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
 
       {mustRespondToBang && (
         <View style={styles.pendingBox}>
-          <Text style={styles.pendingTitle}>Vous êtes visé par un Bang! Répondez :</Text>
+          <Text style={styles.pendingTitle}>Vous êtes visé par un Bang! Répondez : {timerLabel}</Text>
           {hasMissed && <Button title="Jouer Raté!" onPress={() => handleRespond('missed')} disabled={actionLoading} />}
           {canTryBarrel && <Button title="Essayer la Planque" onPress={handleTryBarrel} disabled={actionLoading} />}
           <View style={styles.spacer} />
@@ -206,7 +218,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
 
       {mustRespondToDuel && (
         <View style={styles.pendingBox}>
-          <Text style={styles.pendingTitle}>Duel ! Continuez ou encaissez :</Text>
+          <Text style={styles.pendingTitle}>Duel ! Continuez ou encaissez : {timerLabel}</Text>
           {hasBang && <Button title="Jouer Bang!" onPress={() => handleRespondDuel('discard_bang')} disabled={actionLoading} />}
           <View style={styles.spacer} />
           <Button title="Encaisser les dégâts" color="#a33" onPress={() => handleRespondDuel('accept_damage')} disabled={actionLoading} />
@@ -215,14 +227,14 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
 
       {mustRespondToIndians && (
         <View style={styles.pendingBox}>
-          <Text style={styles.pendingTitle}>Indiens! Défendez-vous ou encaissez :</Text>
+          <Text style={styles.pendingTitle}>Indiens! Défendez-vous ou encaissez : {timerLabel}</Text>
           {hasBang && <Button title="Jouer Bang!" onPress={() => handleRespondIndians('discard_bang')} disabled={actionLoading} />}
           <View style={styles.spacer} />
           <Button title="Encaisser les dégâts" color="#a33" onPress={() => handleRespondIndians('accept_damage')} disabled={actionLoading} />
         </View>
       )}
 
-      {waitingOnOthers && <Text style={styles.pendingTitle}>En attente ({game.pending_type})...</Text>}
+      {waitingOnOthers && <Text style={styles.pendingTitle}>En attente ({game.pending_type})... {timerLabel}</Text>}
 
       {!hasPending && !isMyTurn && (
         <Text style={styles.subtitle}>En attente du joueur au siège {players.find(p => p.id === game.current_player_id)?.seat_position}...</Text>
