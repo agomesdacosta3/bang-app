@@ -8,15 +8,16 @@ type Game = {
   id: string; status: string; current_player_id: string | null; turn_phase: string | null;
   pending_type: string | null; pending_expires_at: string | null; winner_team: string | null;
 };
-type Player = SeatedPlayer & { is_sheriff: boolean; life_points: number; max_life_points: number };
+type Player = SeatedPlayer & { is_sheriff: boolean; life_points: number; max_life_points: number; has_played_bang_this_turn: boolean };
 type HandCard = { id: string; card_type: string };
 type Equipment = { player_id: string; card_type: string };
 
 const CARD_LABELS: Record<string, string> = {
   bang: 'Bang!', missed: 'Raté!', beer: 'Bière', duel: 'Duel', indians: 'Indiens!',
   prison: 'Prison', dynamite: 'Dynamite', barrel: 'Planque',
+  saloon: 'Saloon', stagecoach: 'Diligence', wells_fargo: 'Convoi', mustang: 'Mustang', scope: 'Lunette',
 };
-const EQUIPMENT_TAGS: Record<string, string> = { prison: '🔒', dynamite: '💣', barrel: '🛢️' };
+const EQUIPMENT_TAGS: Record<string, string> = { prison: '🔒', dynamite: '💣', barrel: '🛢️', mustang: '🐎', scope: '🔭' };
 const ROLE_LABELS: Record<string, string> = { sheriff: 'Shérif', deputy: 'Adjoint', outlaw: 'Hors-la-loi', renegade: 'Renégat' };
 const SUIT_LABELS: Record<string, string> = { hearts: 'Cœur', diamonds: 'Carreau', clubs: 'Trèfle', spades: 'Pique' };
 
@@ -120,6 +121,11 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   };
   const handlePlayDynamite = () => runAction(() => callFunction('play-dynamite', { gameId }));
   const handlePlayBarrel = () => runAction(() => callFunction('play-barrel', { gameId }));
+  const handlePlaySaloon = () => runAction(() => callFunction('play-saloon', { gameId }));
+  const handlePlayStagecoach = () => runAction(() => callFunction('play-stagecoach', { gameId }));
+  const handlePlayWellsFargo = () => runAction(() => callFunction('play-wells-fargo', { gameId }));
+  const handlePlayMustang = () => runAction(() => callFunction('play-mustang', { gameId }));
+  const handlePlayScope = () => runAction(() => callFunction('play-scope', { gameId }));
   const handleRespond = (action: 'missed' | 'accept_damage') => runAction(() => callFunction('respond-bang', { gameId, action }));
 
   async function handleTryBarrel() {
@@ -178,19 +184,27 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const hasBang = hand.some(c => c.card_type === 'bang');
   const hasBarrelInPlay = myEquipmentTypes.includes('barrel');
   const canTryBarrel = hasBarrelInPlay && !myPendingRow?.barrel_tried;
-  const targets = players.filter(p => p.is_alive && p.id !== playerId && computeDistance(players, playerId, p.id) <= 1);
+  const mustangIds = new Set(equipment.filter(e => e.card_type === 'mustang').map(e => e.player_id));
+  const scopeIds = new Set(equipment.filter(e => e.card_type === 'scope').map(e => e.player_id));
+  const equipmentFlags = { mustangIds, scopeIds };
+  const targets = players.filter(p => p.is_alive && p.id !== playerId && computeDistance(players, playerId, p.id, equipmentFlags) <= 1);
   const duelTargets = players.filter(p => p.is_alive && p.id !== playerId);
   const prisonTargets = players.filter(p => p.is_alive && p.id !== playerId && !p.is_sheriff && !equipment.some(e => e.player_id === p.id && e.card_type === 'prison'));
 
   const canDraw = isMyTurn && !hasPending && game.turn_phase === 'draw';
   const canAct = isMyTurn && !hasPending && game.turn_phase === 'play' && !discarding;
-  const canPlayBang = canAct && targets.length > 0;
+  const canPlayBang = canAct && targets.length > 0 && !me.has_played_bang_this_turn;
   const canPlayBeer = canAct && aliveCount > 2 && me.life_points < me.max_life_points;
   const canPlayDuel = canAct && duelTargets.length > 0;
   const canPlayIndians = canAct;
   const canPlayPrison = canAct && prisonTargets.length > 0;
   const canPlayDynamite = canAct && !myEquipmentTypes.includes('dynamite');
   const canPlayBarrel = canAct && !hasBarrelInPlay;
+  const canPlaySaloon = canAct;
+  const canPlayStagecoach = canAct;
+  const canPlayWellsFargo = canAct;
+  const canPlayMustang = canAct && !myEquipmentTypes.includes('mustang');
+  const canPlayScope = canAct && !myEquipmentTypes.includes('scope');
 
   const mustRespondToBang = myPendingRow && game.pending_type === 'bang_response';
   const mustRespondToDuel = myPendingRow?.is_current_turn && game.pending_type === 'duel_response';
@@ -255,6 +269,11 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
               {item.card_type === 'prison' && canPlayPrison && <Button title="Jouer" onPress={() => setPrisonTargetPickerFor(item.id)} disabled={actionLoading} />}
               {item.card_type === 'dynamite' && canPlayDynamite && <Button title="Jouer" onPress={handlePlayDynamite} disabled={actionLoading} />}
               {item.card_type === 'barrel' && canPlayBarrel && <Button title="Jouer" onPress={handlePlayBarrel} disabled={actionLoading} />}
+              {item.card_type === 'saloon' && canPlaySaloon && <Button title="Jouer" onPress={handlePlaySaloon} disabled={actionLoading} />}
+              {item.card_type === 'stagecoach' && canPlayStagecoach && <Button title="Jouer" onPress={handlePlayStagecoach} disabled={actionLoading} />}
+              {item.card_type === 'wells_fargo' && canPlayWellsFargo && <Button title="Jouer" onPress={handlePlayWellsFargo} disabled={actionLoading} />}
+              {item.card_type === 'mustang' && canPlayMustang && <Button title="Jouer" onPress={handlePlayMustang} disabled={actionLoading} />}
+              {item.card_type === 'scope' && canPlayScope && <Button title="Jouer" onPress={handlePlayScope} disabled={actionLoading} />}
             </View>
           )}
           ListEmptyComponent={<Text style={styles.hint}>Main vide</Text>}

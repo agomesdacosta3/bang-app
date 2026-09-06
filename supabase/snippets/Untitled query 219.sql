@@ -1,1 +1,1 @@
-select * from players where seat_position = 0 order by joined_at desc ;
+select * from players where seat_position = 0 order by joined_at desc limit 3;

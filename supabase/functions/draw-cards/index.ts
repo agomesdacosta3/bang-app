@@ -4,17 +4,7 @@ import { corsHeaders } from '../_shared/cors.ts';
 import { degainer } from '../_shared/degainer.ts';
 import { applyDamage } from '../_shared/applyDamage.ts';
 import { advanceTurn } from '../_shared/turn.ts';
-
-interface DeckCard { type: string; suit: string; value: number; }
-
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
+import { drawFromDeck } from '../_shared/deck.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -64,24 +54,10 @@ serve(async (req) => {
       }
     }
 
-    const { data: deckRow } = await supabaseAdmin.from('deck_state').select('cards').eq('game_id', gameId).single();
-    let deck: DeckCard[] = deckRow!.cards;
-
-    if (deck.length < 2) {
-      const { data: discarded } = await supabaseAdmin.from('discard_pile').select('id, card_type, suit, value').eq('game_id', gameId);
-      const reshuffled = shuffle((discarded ?? []).map(d => ({ type: d.card_type, suit: d.suit, value: d.value })));
-      deck = [...reshuffled, ...deck];
-      if (discarded?.length) await supabaseAdmin.from('discard_pile').delete().in('id', discarded.map(d => d.id));
-    }
-    if (deck.length < 2) throw new Error('Plus assez de cartes, même après remélange de la défausse');
-
-    const drawn2 = deck.slice(-2);
-    deck = deck.slice(0, -2);
-
+    const drawn2 = await drawFromDeck(gameId, 2);
     await supabaseAdmin.from('hand_cards').insert(drawn2.map(c => ({ player_id: me.id, card_type: c.type, suit: c.suit, value: c.value })));
-    await supabaseAdmin.from('deck_state').update({ cards: deck }).eq('game_id', gameId);
     await supabaseAdmin.from('players').update({ has_played_bang_this_turn: false }).eq('id', me.id);
-    await supabaseAdmin.from('games').update({ turn_phase: 'play', deck_remaining: deck.length }).eq('id', gameId);
+    await supabaseAdmin.from('games').update({ turn_phase: 'play' }).eq('id', gameId);
 
     return new Response(JSON.stringify({ ok: true, drawn: drawn2.map(c => c.type) }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {

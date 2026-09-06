@@ -521,3 +521,58 @@ entrypoint = "./functions/play-barrel/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/play-barrel/*.html" ]
+
+[functions.play-saloon]
+enabled = true
+verify_jwt = false
+import_map = "./functions/play-saloon/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/play-saloon/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/play-saloon/*.html" ]
+
+[functions.play-stagecoach]
+enabled = true
+verify_jwt = false
+import_map = "./functions/play-stagecoach/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/play-stagecoach/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/play-stagecoach/*.html" ]
+
+[functions.play-wells-fargo]
+enabled = true
+verify_jwt = false
+import_map = "./functions/play-wells-fargo/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/play-wells-fargo/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/play-wells-fargo/*.html" ]
+
+[functions.play-mustang]
+enabled = true
+verify_jwt = false
+import_map = "./functions/play-mustang/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/play-mustang/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/play-mustang/*.html" ]
+
+[functions.play-scope]
+enabled = true
+verify_jwt = false
+import_map = "./functions/play-scope/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/play-scope/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/play-scope/*.html" ]

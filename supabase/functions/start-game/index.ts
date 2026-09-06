@@ -29,6 +29,11 @@ function buildDeck(): { type: string; suit: string; value: number }[] {
     ...Array(6).fill('beer'),
     ...Array(3).fill('duel'),
     ...Array(2).fill('indians'),
+    ...Array(1).fill('saloon'),
+    ...Array(2).fill('stagecoach'),
+    ...Array(1).fill('wells_fargo'),
+    ...Array(2).fill('mustang'),
+    ...Array(1).fill('scope'),
   ];
   return shuffle(types.map(randomCard));
 }

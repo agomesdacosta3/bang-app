@@ -28,13 +28,16 @@ async function makeBot() {
   return { client, token: data.session.access_token };
 }
 
-function computeDistance(players, fromId, toId) {
+function computeDistance(players, fromId, toId, mustangIds, scopeIds) {
   const alive = players.filter(p => p.is_alive).sort((a, b) => a.seat_position - b.seat_position);
   const fromIndex = alive.findIndex(p => p.id === fromId);
   const toIndex = alive.findIndex(p => p.id === toId);
   if (fromIndex === -1 || toIndex === -1) return Infinity;
   const n = alive.length;
-  return Math.min((toIndex - fromIndex + n) % n, (fromIndex - toIndex + n) % n);
+  let base = Math.min((toIndex - fromIndex + n) % n, (fromIndex - toIndex + n) % n);
+  if (mustangIds.has(toId)) base += 1;
+  if (scopeIds.has(fromId)) base -= 1;
+  return Math.max(base, 1);
 }
 
 // Gère Bang!, Duel et Indiens! de façon générique. Retourne true si une réponse a été envoyée.
@@ -67,24 +70,32 @@ async function passTurn(bot, gameId, bots) {
   const { data: allPlayers } = await bot.client.from('players').select('id, seat_position, is_alive').eq('game_id', gameId);
   const { data: hand } = await bot.client.from('hand_cards').select('id, card_type').eq('player_id', bot.playerId);
 
+    const { data: allEquipment } = await bot.client.from('cards_in_play').select('player_id, card_type');
+  const mustangIds = new Set((allEquipment ?? []).filter(e => e.card_type === 'mustang').map(e => e.player_id));
+  const scopeIds = new Set((allEquipment ?? []).filter(e => e.card_type === 'scope').map(e => e.player_id));
+
   const bangCard = hand.find(c => c.card_type === 'bang');
   if (bangCard) {
-    const targets = allPlayers.filter(p => p.is_alive && p.id !== bot.playerId && computeDistance(allPlayers, bot.playerId, p.id) <= 1);
+    const targets = allPlayers.filter(p => p.is_alive && p.id !== bot.playerId && computeDistance(allPlayers, bot.playerId, p.id, mustangIds, scopeIds) <= 1);
     if (targets.length > 0) {
       const target = targets[Math.floor(Math.random() * targets.length)];
-      console.log(`  → siège ${bot.seat} attaque le siège ${target.seat_position} !`);
-      await call('play-bang', bot.token, { gameId, targetPlayerId: target.id });
+      try {
+        console.log(`  → siège ${bot.seat} attaque le siège ${target.seat_position} !`);
+        await call('play-bang', bot.token, { gameId, targetPlayerId: target.id });
 
-      const targetBot = bots.find(b => b.playerId === target.id);
-      if (targetBot) {
-        await respondIfPending(targetBot, gameId);
-      } else {
-        for (let i = 0; i < 30; i++) {
-          await new Promise(r => setTimeout(r, 1000));
-          const { data: g } = await bot.client.from('games').select('pending_type').eq('id', gameId).single();
-          if (!g.pending_type) break;
-          if (i === 25) await call('resolve-timeout', bot.token, { gameId });
+        const targetBot = bots.find(b => b.playerId === target.id);
+        if (targetBot) {
+          await respondIfPending(targetBot, gameId);
+        } else {
+          for (let i = 0; i < 30; i++) {
+            await new Promise(r => setTimeout(r, 1000));
+            const { data: g } = await bot.client.from('games').select('pending_type').eq('id', gameId).single();
+            if (!g.pending_type) break;
+            if (i === 25) await call('resolve-timeout', bot.token, { gameId });
+          }
         }
+      } catch (err) {
+        console.log(`  → attaque annulée : ${err.message}`);
       }
     }
   }

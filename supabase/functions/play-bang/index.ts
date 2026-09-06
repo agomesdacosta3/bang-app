@@ -22,9 +22,14 @@ serve(async (req) => {
     if (game.current_player_id !== me.id) throw new Error('Ce n’est pas votre tour');
     if (me.has_played_bang_this_turn) throw new Error('Une seule carte Bang! par tour');
 
-    const target = players!.find(p => p.id === targetPlayerId);
+        const target = players!.find(p => p.id === targetPlayerId);
     if (!target?.is_alive) throw new Error('Cible invalide');
-    if (computeDistance(players!, me.id, target.id) > 1) throw new Error('Hors de portée (Colt .45 = distance 1)');
+
+    const { data: allEquipment } = await supabaseAdmin.from('cards_in_play').select('player_id, card_type').in('player_id', players!.map(p => p.id));
+    const mustangIds = new Set((allEquipment ?? []).filter(e => e.card_type === 'mustang').map(e => e.player_id));
+    const scopeIds = new Set((allEquipment ?? []).filter(e => e.card_type === 'scope').map(e => e.player_id));
+    const distance = computeDistance(players!, me.id, target.id, { mustangIds, scopeIds });
+    if (distance > 1) throw new Error(`Hors de portée (distance ${distance}, Colt .45 = 1)`);
 
     const { data: bangCard } = await supabaseAdmin.from('hand_cards').select('id, suit, value').eq('player_id', me.id).eq('card_type', 'bang').limit(1).single();
     if (!bangCard) throw new Error('Vous n’avez pas de carte Bang! en main');
