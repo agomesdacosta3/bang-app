@@ -20,11 +20,11 @@ serve(async (req) => {
     if (!me) throw new Error('Vous ne participez pas à cette partie');
     if (game.current_player_id !== me.id) throw new Error('Ce n’est pas votre tour');
 
-    const { data: indiansCard } = await supabaseAdmin.from('hand_cards').select('id').eq('player_id', me.id).eq('card_type', 'indians').limit(1).single();
+    const { data: indiansCard } = await supabaseAdmin.from('hand_cards').select('id, suit, value').eq('player_id', me.id).eq('card_type', 'indians').limit(1).single();
     if (!indiansCard) throw new Error('Vous n’avez pas de carte Indiens! en main');
 
     await supabaseAdmin.from('hand_cards').delete().eq('id', indiansCard.id);
-    await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'indians' });
+    await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'indians', suit: indiansCard.suit, value: indiansCard.value });
 
     const others = players!.filter(p => p.is_alive && p.id !== me.id);
     await startPending(gameId, me.id, 'indians_response', others.map(p => ({ playerId: p.id, isCurrentTurn: true })));

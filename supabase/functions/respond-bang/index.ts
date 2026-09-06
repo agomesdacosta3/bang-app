@@ -20,10 +20,10 @@ serve(async (req) => {
     if (!myPending) throw new Error('Ce n’est pas à vous de répondre');
 
     if (action === 'missed') {
-      const { data: missedCard } = await supabaseAdmin.from('hand_cards').select('id').eq('player_id', me!.id).eq('card_type', 'missed').limit(1).single();
+      const { data: missedCard } = await supabaseAdmin.from('hand_cards').select('id, suit, value').eq('player_id', me!.id).eq('card_type', 'missed').limit(1).single();
       if (!missedCard) throw new Error('Vous n’avez pas de carte Raté!');
       await supabaseAdmin.from('hand_cards').delete().eq('id', missedCard.id);
-      await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'missed' });
+      await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'missed', suit: missedCard.suit, value: missedCard.value });
     } else if (action === 'accept_damage') {
       await applyDamage(gameId, me!.id);
     } else {

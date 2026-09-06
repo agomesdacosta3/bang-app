@@ -26,11 +26,11 @@ serve(async (req) => {
     if (!target?.is_alive) throw new Error('Cible invalide');
     if (computeDistance(players!, me.id, target.id) > 1) throw new Error('Hors de portée (Colt .45 = distance 1)');
 
-    const { data: bangCard } = await supabaseAdmin.from('hand_cards').select('id').eq('player_id', me.id).eq('card_type', 'bang').limit(1).single();
+    const { data: bangCard } = await supabaseAdmin.from('hand_cards').select('id, suit, value').eq('player_id', me.id).eq('card_type', 'bang').limit(1).single();
     if (!bangCard) throw new Error('Vous n’avez pas de carte Bang! en main');
 
     await supabaseAdmin.from('hand_cards').delete().eq('id', bangCard.id);
-    await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'bang' });
+    await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'bang', suit: bangCard.suit, value: bangCard.value });
     await supabaseAdmin.from('players').update({ has_played_bang_this_turn: true }).eq('id', me.id);
     await startPending(gameId, me.id, 'bang_response', [{ playerId: target.id, isCurrentTurn: true }]);
 

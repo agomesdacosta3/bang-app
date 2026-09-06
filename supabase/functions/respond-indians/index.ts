@@ -10,7 +10,7 @@ serve(async (req) => {
     const { data: { user } } = await supabaseAdmin.auth.getUser(token);
     if (!user) throw new Error('Non authentifié');
 
-    const { gameId, action } = await req.json(); // 'discard_bang' | 'accept_damage'
+    const { gameId, action } = await req.json();
     const { data: game } = await supabaseAdmin.from('games').select('*').eq('id', gameId).single();
     if (!game || game.pending_type !== 'indians_response') throw new Error('Aucun Indiens! en attente');
 
@@ -19,10 +19,10 @@ serve(async (req) => {
     if (!myPending) throw new Error('Vous n’avez pas à répondre à cet Indiens!');
 
     if (action === 'discard_bang') {
-      const { data: bangCard } = await supabaseAdmin.from('hand_cards').select('id').eq('player_id', me!.id).eq('card_type', 'bang').limit(1).single();
+      const { data: bangCard } = await supabaseAdmin.from('hand_cards').select('id, suit, value').eq('player_id', me!.id).eq('card_type', 'bang').limit(1).single();
       if (!bangCard) throw new Error('Vous n’avez pas de carte Bang!');
       await supabaseAdmin.from('hand_cards').delete().eq('id', bangCard.id);
-      await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'bang' });
+      await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'bang', suit: bangCard.suit, value: bangCard.value });
     } else if (action === 'accept_damage') {
       await applyDamage(gameId, me!.id);
     } else {

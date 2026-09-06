@@ -22,13 +22,12 @@ serve(async (req) => {
 
     const target = players!.find(p => p.id === targetPlayerId);
     if (!target?.is_alive || target.id === me.id) throw new Error('Cible invalide');
-    // Pas de vérification de distance : le Duel peut viser n'importe qui
 
-    const { data: duelCard } = await supabaseAdmin.from('hand_cards').select('id').eq('player_id', me.id).eq('card_type', 'duel').limit(1).single();
+    const { data: duelCard } = await supabaseAdmin.from('hand_cards').select('id, suit, value').eq('player_id', me.id).eq('card_type', 'duel').limit(1).single();
     if (!duelCard) throw new Error('Vous n’avez pas de carte Duel en main');
 
     await supabaseAdmin.from('hand_cards').delete().eq('id', duelCard.id);
-    await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'duel' });
+    await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'duel', suit: duelCard.suit, value: duelCard.value });
 
     await startPending(gameId, me.id, 'duel_response', [
       { playerId: target.id, isCurrentTurn: true },

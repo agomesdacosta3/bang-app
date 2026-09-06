@@ -1,1 +1,1 @@
-select life_points, is_alive from players where id = 'a5beca1d-dfaa-4091-9893-73c73ac09b69' limit 100;
+select card_type, suit, value from hand_cards order by created_at desc limit 10;

@@ -23,11 +23,11 @@ serve(async (req) => {
     if (aliveCount <= 2) throw new Error('La Bière n’a aucun effet à 2 joueurs ou moins');
     if (me.life_points >= me.max_life_points) throw new Error('Vous êtes déjà au maximum de points de vie');
 
-    const { data: beerCard } = await supabaseAdmin.from('hand_cards').select('id').eq('player_id', me.id).eq('card_type', 'beer').limit(1).single();
+    const { data: beerCard } = await supabaseAdmin.from('hand_cards').select('id, suit, value').eq('player_id', me.id).eq('card_type', 'beer').limit(1).single();
     if (!beerCard) throw new Error('Vous n’avez pas de carte Bière en main');
 
     await supabaseAdmin.from('hand_cards').delete().eq('id', beerCard.id);
-    await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'beer' });
+    await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'beer', suit: beerCard.suit, value: beerCard.value });
     await supabaseAdmin.from('players').update({ life_points: me.life_points + 1 }).eq('id', me.id);
 
     return new Response(JSON.stringify({ ok: true, newLifePoints: me.life_points + 1 }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

@@ -9,7 +9,7 @@ serve(async (req) => {
     const { data: { user } } = await supabaseAdmin.auth.getUser(token);
     if (!user) throw new Error('Non authentifié');
 
-    const { gameId, cardIds } = await req.json(); // cardIds: string[], peut être vide
+    const { gameId, cardIds } = await req.json();
     const { data: game } = await supabaseAdmin.from('games').select('*').eq('id', gameId).single();
     if (!game || game.status !== 'in_progress' || game.turn_phase !== 'play') throw new Error('Ce n’est pas la phase de défausse');
     if (game.pending_type) throw new Error('Une réponse est en attente, impossible de terminer le tour');
@@ -24,9 +24,9 @@ serve(async (req) => {
     if (cardIds.length) {
       const toDiscard = hand!.filter(h => cardIds.includes(h.id));
       if (toDiscard.length !== cardIds.length) throw new Error('Une des cartes indiquées ne vous appartient pas');
-      const { data: discardedCards } = await supabaseAdmin.from('hand_cards').select('id, card_type').in('id', cardIds);
+      const { data: discardedCards } = await supabaseAdmin.from('hand_cards').select('id, card_type, suit, value').in('id', cardIds);
       await supabaseAdmin.from('hand_cards').delete().in('id', cardIds);
-      await supabaseAdmin.from('discard_pile').insert(discardedCards!.map(c => ({ game_id: gameId, card_type: c.card_type })));
+      await supabaseAdmin.from('discard_pile').insert(discardedCards!.map(c => ({ game_id: gameId, card_type: c.card_type, suit: c.suit, value: c.value })));
     }
 
     const alive = players!.filter(p => p.is_alive).sort((a, b) => a.seat_position - b.seat_position);

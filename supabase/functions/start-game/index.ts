@@ -7,6 +7,8 @@ const ROLE_SETUP: Record<number, { outlaws: number; deputies: number }> = {
   6: { outlaws: 3, deputies: 1 }, 7: { outlaws: 3, deputies: 2 },
 };
 
+const SUITS = ['hearts', 'diamonds', 'clubs', 'spades'];
+
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -16,14 +18,19 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-function buildDeck(): string[] {
-  return shuffle([
+function randomCard(type: string) {
+  return { type, suit: SUITS[Math.floor(Math.random() * 4)], value: 2 + Math.floor(Math.random() * 13) };
+}
+
+function buildDeck(): { type: string; suit: string; value: number }[] {
+  const types = [
     ...Array(20).fill('bang'),
     ...Array(10).fill('missed'),
     ...Array(6).fill('beer'),
     ...Array(3).fill('duel'),
     ...Array(2).fill('indians'),
-  ]);
+  ];
+  return shuffle(types.map(randomCard));
 }
 
 serve(async (req) => {
@@ -60,11 +67,12 @@ serve(async (req) => {
     ]);
 
     let deck = buildDeck();
-    const handInserts: { player_id: string; card_type: string }[] = [];
+    const handInserts: { player_id: string; card_type: string; suit: string; value: number }[] = [];
     for (const p of players) {
       const handSize = p.id === sheriff.id ? 5 : 4;
-      handInserts.push(...deck.slice(-handSize).map(card_type => ({ player_id: p.id, card_type })));
+      const dealt = deck.slice(-handSize);
       deck = deck.slice(0, -handSize);
+      handInserts.push(...dealt.map(c => ({ player_id: p.id, card_type: c.type, suit: c.suit, value: c.value })));
     }
     await supabaseAdmin.from('hand_cards').insert(handInserts);
     await supabaseAdmin.from('deck_state').insert({ game_id: gameId, cards: deck });
