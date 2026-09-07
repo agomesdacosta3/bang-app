@@ -3,12 +3,15 @@ const { createClient } = require('@supabase/supabase-js');
 const LOCAL_URL = 'http://127.0.0.1:54321';
 const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0';
 const PUBLISHABLE_KEY = 'sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH';
+const SERVICE_ROLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU';
 
-const JOIN_CODE = process.argv[2];
-if (!JOIN_CODE) {
-  console.error('Usage: node scripts/fill-and-play.js CODE');
+const GAME_ID = process.argv[2];
+if (!GAME_ID) {
+  console.error('Usage: node scripts/resume-play.js GAME_ID');
   process.exit(1);
 }
+
+const admin = createClient(LOCAL_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
 async function call(fn, token, body) {
   const res = await fetch(`${LOCAL_URL}/functions/v1/${fn}`, {
@@ -21,13 +24,6 @@ async function call(fn, token, body) {
   return data;
 }
 
-async function makeBot() {
-  const client = createClient(LOCAL_URL, ANON_KEY, { auth: { persistSession: false } });
-  const { data, error } = await client.auth.signInAnonymously();
-  if (error) throw error;
-  return { client, token: data.session.access_token };
-}
-
 function computeDistance(players, fromId, toId, mustangIds, scopeIds) {
   const alive = players.filter(p => p.is_alive).sort((a, b) => a.seat_position - b.seat_position);
   const fromIndex = alive.findIndex(p => p.id === fromId);
@@ -38,6 +34,16 @@ function computeDistance(players, fromId, toId, mustangIds, scopeIds) {
   if (mustangIds.has(toId)) base += 1;
   if (scopeIds.has(fromId)) base -= 1;
   return Math.max(base, 1);
+}
+
+async function reassignToFreshBot(playerId, seat) {
+  const anon = createClient(LOCAL_URL, ANON_KEY, { auth: { persistSession: false } });
+  const { data, error } = await anon.auth.signInAnonymously();
+  if (error) throw error;
+  const { error: updateError } = await admin.from('players').update({ user_id: data.user.id }).eq('id', playerId);
+  if (updateError) throw updateError;
+  console.log(`Bot repris — siège ${seat}, playerId ${playerId}`);
+  return { client: anon, token: data.session.access_token, playerId, seat };
 }
 
 async function respondIfPending(bot, gameId) {
@@ -82,17 +88,18 @@ async function respondIfPending(bot, gameId) {
   return true;
 }
 
-async function passTurn(bot, gameId, bots) {
-  const { data: equipment } = await bot.client.from('cards_in_play').select('card_type').eq('player_id', bot.playerId);
-  if (equipment?.some(c => c.card_type === 'dynamite' || c.card_type === 'prison')) {
-    const startResult = await call('resolve-start-of-turn', bot.token, { gameId });
-    if (startResult.turnEnded) {
-      console.log(`  → siège ${bot.seat} a vu son tour écourté (Prison/Dynamite)`);
-      return;
+async function passTurn(bot, gameId, bots, turnPhase) {
+  if (turnPhase === 'draw') {
+    const { data: equipment } = await bot.client.from('cards_in_play').select('card_type').eq('player_id', bot.playerId);
+    if (equipment?.some(c => c.card_type === 'dynamite' || c.card_type === 'prison')) {
+      const startResult = await call('resolve-start-of-turn', bot.token, { gameId });
+      if (startResult.turnEnded) {
+        console.log(`  → siège ${bot.seat} a vu son tour écourté (Prison/Dynamite)`);
+        return;
+      }
     }
+    await call('draw-cards', bot.token, { gameId });
   }
-
-  await call('draw-cards', bot.token, { gameId });
 
   const { data: allPlayers } = await bot.client.from('players').select('id, seat_position, is_alive').eq('game_id', gameId);
   const { data: hand } = await bot.client.from('hand_cards').select('id, card_type').eq('player_id', bot.playerId);
@@ -135,42 +142,40 @@ async function passTurn(bot, gameId, bots) {
 }
 
 async function run() {
+  const { data: allPlayers } = await admin.from('players').select('id, seat_position').eq('game_id', GAME_ID).order('seat_position');
+  if (!allPlayers?.length) throw new Error('Partie introuvable ou sans joueurs');
+
+  // Convention utilisée depuis le début : le siège 0 est toujours celui qui a créé la partie (le téléphone)
+  const botPlayers = allPlayers.filter(p => p.seat_position !== 0);
+
   const bots = [];
-  let gameId;
-  for (let i = 0; i < 3; i++) {
-    const bot = await makeBot();
-    const joined = await call('join-game', bot.token, { joinCode: JOIN_CODE });
-    gameId = joined.gameId;
-    bots.push({ ...bot, playerId: joined.playerId, seat: joined.seatPosition });
-    console.log(`Bot ${i + 1} a rejoint — siège ${joined.seatPosition}, playerId ${joined.playerId}`);
+  for (const p of botPlayers) {
+    bots.push(await reassignToFreshBot(p.id, p.seat_position));
   }
 
-  await call('start-game', bots[0].token, { gameId });
-  console.log('Partie démarrée.\n');
-
   while (true) {
-    const { data: game } = await bots[0].client.from('games').select('current_player_id, status, pending_type').eq('id', gameId).single();
+    const { data: game } = await admin.from('games').select('current_player_id, status, pending_type, turn_phase').eq('id', GAME_ID).single();
     if (game.status === 'finished') { console.log('Partie terminée.'); return; }
 
     if (['bang_response', 'duel_response', 'indians_response', 'gatling_response', 'cat_balou_discard'].includes(game.pending_type)) {
-      const { data: pendingRows } = await bots[0].client.from('pending_targets').select('player_id');
+      const { data: pendingRows } = await admin.from('pending_targets').select('player_id');
       for (const row of pendingRows ?? []) {
         const bot = bots.find(b => b.playerId === row.player_id);
-        if (bot) await respondIfPending(bot, gameId);
+        if (bot) await respondIfPending(bot, GAME_ID);
       }
       await new Promise(r => setTimeout(r, 1000));
       continue;
     }
 
     if (game.pending_type === 'general_store') {
-      const { data: currentRow } = await bots[0].client.from('pending_targets').select('player_id').eq('game_id', gameId).eq('is_current_turn', true).maybeSingle();
+      const { data: currentRow } = await admin.from('pending_targets').select('player_id').eq('game_id', GAME_ID).eq('is_current_turn', true).maybeSingle();
       const bot = bots.find(b => b.playerId === currentRow?.player_id);
       if (bot) {
-        const { data: cards } = await bot.client.from('general_store_cards').select('id').eq('game_id', gameId);
+        const { data: cards } = await bot.client.from('general_store_cards').select('id').eq('game_id', GAME_ID);
         if (cards?.length) {
           const choice = cards[Math.floor(Math.random() * cards.length)];
           console.log(`  → siège ${bot.seat} choisit une carte du Magasin`);
-          await call('pick-general-store-card', bot.token, { gameId, cardId: choice.id });
+          await call('pick-general-store-card', bot.token, { gameId: GAME_ID, cardId: choice.id });
         }
       }
       await new Promise(r => setTimeout(r, 1000));
@@ -178,13 +183,10 @@ async function run() {
     }
 
     const bot = bots.find(b => b.playerId === game.current_player_id);
-    if (!bot) {
-      await new Promise(r => setTimeout(r, 2000));
-      continue;
-    }
+    if (!bot) { await new Promise(r => setTimeout(r, 2000)); continue; }
 
     console.log(`Passage du tour — siège ${bot.seat}...`);
-    await passTurn(bot, gameId, bots);
+    await passTurn(bot, GAME_ID, bots, game.turn_phase);
   }
 }
 

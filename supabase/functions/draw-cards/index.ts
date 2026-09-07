@@ -1,9 +1,6 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
 import { corsHeaders } from '../_shared/cors.ts';
-import { degainer } from '../_shared/degainer.ts';
-import { applyDamage } from '../_shared/applyDamage.ts';
-import { advanceTurn } from '../_shared/turn.ts';
 import { drawFromDeck } from '../_shared/deck.ts';
 
 serve(async (req) => {
@@ -21,37 +18,8 @@ serve(async (req) => {
     if (!me || game.current_player_id !== me.id) throw new Error('Ce n’est pas votre tour');
 
     const { data: equipment } = await supabaseAdmin.from('cards_in_play').select('card_type').eq('player_id', me.id);
-    const hasDynamite = equipment?.some(c => c.card_type === 'dynamite');
-    const hasPrison = equipment?.some(c => c.card_type === 'prison');
-
-    if (hasDynamite) {
-      const drawn = await degainer(gameId);
-      await supabaseAdmin.from('cards_in_play').delete().eq('player_id', me.id).eq('card_type', 'dynamite');
-      const explodes = drawn.suit === 'spades' && drawn.value >= 2 && drawn.value <= 9;
-
-      if (explodes) {
-        await applyDamage(gameId, me.id, 3);
-        const { data: after } = await supabaseAdmin.from('players').select('is_alive').eq('id', me.id).single();
-        if (!after!.is_alive) {
-          const next = await advanceTurn(gameId, me.id);
-          return new Response(JSON.stringify({ ok: true, eliminatedByDynamite: true, nextPlayerId: next.id }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-        }
-      } else {
-        const { data: allPlayers } = await supabaseAdmin.from('players').select('*').eq('game_id', gameId).order('seat_position');
-        const alive = allPlayers!.filter(p => p.is_alive);
-        const myIndex = alive.findIndex(p => p.id === me.id);
-        const leftNeighbor = alive[(myIndex + 1) % alive.length];
-        await supabaseAdmin.from('cards_in_play').insert({ player_id: leftNeighbor.id, card_type: 'dynamite' });
-      }
-    }
-
-    if (hasPrison) {
-      const drawn = await degainer(gameId);
-      await supabaseAdmin.from('cards_in_play').delete().eq('player_id', me.id).eq('card_type', 'prison');
-      if (drawn.suit !== 'hearts') {
-        const next = await advanceTurn(gameId, me.id);
-        return new Response(JSON.stringify({ ok: true, skippedTurn: true, nextPlayerId: next.id }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
-      }
+    if (equipment?.some(c => c.card_type === 'dynamite' || c.card_type === 'prison')) {
+      throw new Error('Vous devez d’abord dégainer');
     }
 
     const drawn2 = await drawFromDeck(gameId, 2);

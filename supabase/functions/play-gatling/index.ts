@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
+import { startPending } from '../_shared/pending.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 
 serve(async (req) => {
@@ -19,18 +20,14 @@ serve(async (req) => {
     if (!me) throw new Error('Vous ne participez pas à cette partie');
     if (game.current_player_id !== me.id) throw new Error('Ce n’est pas votre tour');
 
-    const injured = players!.filter(p => p.is_alive && p.life_points < p.max_life_points);
-    if (injured.length === 0) throw new Error('Tous les joueurs sont déjà au maximum de vie');
+    const { data: gatlingCard } = await supabaseAdmin.from('hand_cards').select('id, suit, value').eq('player_id', me.id).eq('card_type', 'gatling').limit(1).single();
+    if (!gatlingCard) throw new Error('Vous n’avez pas de carte Gatling en main');
 
-    const { data: saloonCard } = await supabaseAdmin.from('hand_cards').select('id, suit, value').eq('player_id', me.id).eq('card_type', 'saloon').limit(1).single();
-    if (!saloonCard) throw new Error('Vous n’avez pas de carte Saloon en main');
+    await supabaseAdmin.from('hand_cards').delete().eq('id', gatlingCard.id);
+    await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'gatling', suit: gatlingCard.suit, value: gatlingCard.value });
 
-    await supabaseAdmin.from('hand_cards').delete().eq('id', saloonCard.id);
-    await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'saloon', suit: saloonCard.suit, value: saloonCard.value });
-
-    for (const p of injured) {
-      await supabaseAdmin.from('players').update({ life_points: p.life_points + 1 }).eq('id', p.id);
-    }
+    const others = players!.filter(p => p.is_alive && p.id !== me.id);
+    await startPending(gameId, me.id, 'gatling_response', others.map(p => ({ playerId: p.id, isCurrentTurn: true })));
 
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {

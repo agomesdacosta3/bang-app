@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
+import { startPending } from '../_shared/pending.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 
 serve(async (req) => {
@@ -9,7 +10,7 @@ serve(async (req) => {
     const { data: { user } } = await supabaseAdmin.auth.getUser(token);
     if (!user) throw new Error('Non authentifié');
 
-    const { gameId } = await req.json();
+    const { gameId, targetPlayerId } = await req.json();
     const { data: game } = await supabaseAdmin.from('games').select('*').eq('id', gameId).single();
     if (!game || game.status !== 'in_progress' || game.turn_phase !== 'play') throw new Error('Ce n’est pas le moment de jouer une carte');
     if (game.pending_type) throw new Error('Une réponse est déjà en attente');
@@ -19,18 +20,21 @@ serve(async (req) => {
     if (!me) throw new Error('Vous ne participez pas à cette partie');
     if (game.current_player_id !== me.id) throw new Error('Ce n’est pas votre tour');
 
-    const injured = players!.filter(p => p.is_alive && p.life_points < p.max_life_points);
-    if (injured.length === 0) throw new Error('Tous les joueurs sont déjà au maximum de vie');
+    const target = players!.find(p => p.id === targetPlayerId);
+    if (!target?.is_alive || target.id === me.id) throw new Error('Cible invalide');
 
-    const { data: saloonCard } = await supabaseAdmin.from('hand_cards').select('id, suit, value').eq('player_id', me.id).eq('card_type', 'saloon').limit(1).single();
-    if (!saloonCard) throw new Error('Vous n’avez pas de carte Saloon en main');
+    const { data: cbCard } = await supabaseAdmin.from('hand_cards').select('id, suit, value').eq('player_id', me.id).eq('card_type', 'cat_balou').limit(1).single();
+    if (!cbCard) throw new Error('Vous n’avez pas de carte Coup de foudre en main');
 
-    await supabaseAdmin.from('hand_cards').delete().eq('id', saloonCard.id);
-    await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'saloon', suit: saloonCard.suit, value: saloonCard.value });
+    const { data: targetHand } = await supabaseAdmin.from('hand_cards').select('id').eq('player_id', target.id);
+    const { data: targetEquipment } = await supabaseAdmin.from('cards_in_play').select('id').eq('player_id', target.id);
+    if (!targetHand?.length && !targetEquipment?.length) throw new Error('Ce joueur n’a aucune carte à défausser');
 
-    for (const p of injured) {
-      await supabaseAdmin.from('players').update({ life_points: p.life_points + 1 }).eq('id', p.id);
-    }
+    await supabaseAdmin.from('hand_cards').delete().eq('id', cbCard.id);
+    await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'cat_balou', suit: cbCard.suit, value: cbCard.value });
+
+    // Le choix (main ou en jeu, et laquelle) appartient entièrement à la cible
+    await startPending(gameId, me.id, 'cat_balou_discard', [{ playerId: target.id, isCurrentTurn: true }]);
 
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {

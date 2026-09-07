@@ -1,2 +1,1 @@
-select id from games where join_code = 'AJ5AB6y' limit 100;
-
+insert into cards_in_play (player_id, card_type) values ('da9307d1-cac1-4e5d-9020-5b4034c9e071', 'mustang');

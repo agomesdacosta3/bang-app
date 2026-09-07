@@ -1,0 +1,1 @@
+alter type pending_action_type add value 'cat_balou_discard';

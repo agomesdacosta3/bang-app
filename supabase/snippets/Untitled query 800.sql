@@ -1,0 +1,2 @@
+update games set current_player_id = 'fff51537-fe9b-421b-aa58-8db2198ac5d8', turn_phase = 'play' where id = '3037bbfe-2355-433c-ae2a-749e2f594f4f';
+insert into hand_cards (player_id, card_type, suit, value) values ('fff51537-fe9b-421b-aa58-8db2198ac5d8', 'cat_balou', 'hearts', 5);

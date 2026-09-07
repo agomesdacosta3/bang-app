@@ -11,11 +11,13 @@ type Game = {
 type Player = SeatedPlayer & { is_sheriff: boolean; life_points: number; max_life_points: number; has_played_bang_this_turn: boolean };
 type HandCard = { id: string; card_type: string };
 type Equipment = { player_id: string; card_type: string };
+type StoreCard = { id: string; card_type: string; suit: string; value: number };
 
 const CARD_LABELS: Record<string, string> = {
   bang: 'Bang!', missed: 'Raté!', beer: 'Bière', duel: 'Duel', indians: 'Indiens!',
   prison: 'Prison', dynamite: 'Dynamite', barrel: 'Planque',
   saloon: 'Saloon', stagecoach: 'Diligence', wells_fargo: 'Convoi', mustang: 'Mustang', scope: 'Lunette',
+  panic: 'Braquage!', cat_balou: 'Coup de foudre', gatling: 'Gatling', general_store: 'Magasin',
 };
 const EQUIPMENT_TAGS: Record<string, string> = { prison: '🔒', dynamite: '💣', barrel: '🛢️', mustang: '🐎', scope: '🔭' };
 const ROLE_LABELS: Record<string, string> = { sheriff: 'Shérif', deputy: 'Adjoint', outlaw: 'Hors-la-loi', renegade: 'Renégat' };
@@ -28,9 +30,13 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [rolesMap, setRolesMap] = useState<Record<string, string>>({});
   const [myPendingRow, setMyPendingRow] = useState<{ is_current_turn: boolean; barrel_tried: boolean } | null>(null);
+  const [storeCards, setStoreCards] = useState<StoreCard[]>([]);
   const [targetPickerFor, setTargetPickerFor] = useState<string | null>(null);
   const [duelTargetPickerFor, setDuelTargetPickerFor] = useState<string | null>(null);
   const [prisonTargetPickerFor, setPrisonTargetPickerFor] = useState<string | null>(null);
+  const [panicTargetPickerFor, setPanicTargetPickerFor] = useState<string | null>(null);
+  const [catbalouTargetPickerFor, setCatbalouTargetPickerFor] = useState<string | null>(null);
+  const [stealFlow, setStealFlow] = useState<{ targetId: string } | null>(null);
   const [discarding, setDiscarding] = useState(false);
   const [selectedDiscards, setSelectedDiscards] = useState<string[]>([]);
   const [actionLoading, setActionLoading] = useState(false);
@@ -49,6 +55,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     const { data: h } = await supabase.from('hand_cards').select('id, card_type').eq('player_id', playerId);
     const { data: pending } = await supabase.from('pending_targets').select('is_current_turn, barrel_tried').eq('game_id', gameId).eq('player_id', playerId).maybeSingle();
     const { data: eq } = p?.length ? await supabase.from('cards_in_play').select('player_id, card_type').in('player_id', p.map(pl => pl.id)) : { data: [] };
+    const { data: sc } = await supabase.from('general_store_cards').select('id, card_type, suit, value').eq('game_id', gameId);
 
     const eliminatedIds = (p ?? []).filter(pl => !pl.is_alive).map(pl => pl.id);
     const idsForRoles = Array.from(new Set([...eliminatedIds, playerId]));
@@ -61,6 +68,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     if (h) setHand(h);
     setMyPendingRow(pending ?? null);
     setEquipment(eq ?? []);
+    setStoreCards(sc ?? []);
     setRolesMap(map);
     setLastSync(new Date().toLocaleTimeString());
   }
@@ -74,11 +82,11 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hand_cards', filter: `player_id=eq.${playerId}` }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pending_targets', filter: `game_id=eq.${gameId}` }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cards_in_play' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'general_store_cards', filter: `game_id=eq.${gameId}` }, loadAll)
       .subscribe((status) => setChannelStatus(status));
     return () => { supabase.removeChannel(channel); };
   }, [gameId, playerId]);
 
-  // Compteur visible + déclenchement automatique du timeout, revérifié chaque seconde
   useEffect(() => {
     firedTimeoutRef.current = false;
     if (!game?.pending_expires_at) { setSecondsLeft(null); return; }
@@ -104,6 +112,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     try { await action(); } catch (err: any) { Alert.alert('Erreur', err.message); } finally { setActionLoading(false); }
   }
 
+  const handleDegainer = () => runAction(() => callFunction('resolve-start-of-turn', { gameId }));
   const handleDraw = () => runAction(() => callFunction('draw-cards', { gameId }));
   const handlePlayBeer = () => runAction(() => callFunction('play-beer', { gameId }));
   const handlePlayBang = (targetPlayerId: string) => {
@@ -126,7 +135,26 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const handlePlayWellsFargo = () => runAction(() => callFunction('play-wells-fargo', { gameId }));
   const handlePlayMustang = () => runAction(() => callFunction('play-mustang', { gameId }));
   const handlePlayScope = () => runAction(() => callFunction('play-scope', { gameId }));
+  const handlePlayGatling = () => runAction(() => callFunction('play-gatling', { gameId }));
+  const handlePlayGeneralStore = () => runAction(() => callFunction('play-general-store', { gameId }));
   const handleRespond = (action: 'missed' | 'accept_damage') => runAction(() => callFunction('respond-bang', { gameId, action }));
+  const handleRespondGatling = (action: 'missed' | 'accept_damage') => runAction(() => callFunction('respond-gatling', { gameId, action }));
+  const handleRespondDuel = (action: 'discard_bang' | 'accept_damage') => runAction(() => callFunction('respond-duel', { gameId, action }));
+  const handleRespondIndians = (action: 'discard_bang' | 'accept_damage') => runAction(() => callFunction('respond-indians', { gameId, action }));
+  const handlePickStoreCard = (cardId: string) => runAction(() => callFunction('pick-general-store-card', { gameId, cardId }));
+  const handleRespondCatBalouHand = (handCardId: string) => runAction(() => callFunction('respond-catbalou', { gameId, handCardId }));
+  const handleRespondCatBalouEquip = (inPlayCardType: string) => runAction(() => callFunction('respond-catbalou', { gameId, inPlayCardType }));
+  const handlePlayCatBalou = (targetPlayerId: string) => {
+    setCatbalouTargetPickerFor(null);
+    return runAction(() => callFunction('play-catbalou', { gameId, targetPlayerId }));
+  };
+
+  function handleSteal(source: 'hand' | 'in_play', cardType?: string) {
+    if (!stealFlow) return;
+    const { targetId } = stealFlow;
+    setStealFlow(null);
+    return runAction(() => callFunction('play-panic', { gameId, targetPlayerId: targetId, source, cardType }));
+  }
 
   async function handleTryBarrel() {
     if (actionLoading) return;
@@ -143,8 +171,20 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     }
   }
 
-  const handleRespondDuel = (action: 'discard_bang' | 'accept_damage') => runAction(() => callFunction('respond-duel', { gameId, action }));
-  const handleRespondIndians = (action: 'discard_bang' | 'accept_damage') => runAction(() => callFunction('respond-indians', { gameId, action }));
+  async function handleTryBarrelGatling() {
+    if (actionLoading) return;
+    setActionLoading(true);
+    try {
+      const result = await callFunction('respond-gatling', { gameId, action: 'try_barrel' });
+      if (result?.barrelWorked === false) {
+        Alert.alert('Planque ratée', `Carte tirée : ${SUIT_LABELS[result.drawnSuit] ?? result.drawnSuit}. Choisissez une autre réponse.`);
+      }
+    } catch (err: any) {
+      Alert.alert('Erreur', err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  }
 
   function toggleDiscardSelection(cardId: string) {
     setSelectedDiscards(prev => prev.includes(cardId) ? prev.filter(id => id !== cardId) : [...prev, cardId]);
@@ -184,6 +224,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const hasBang = hand.some(c => c.card_type === 'bang');
   const hasBarrelInPlay = myEquipmentTypes.includes('barrel');
   const canTryBarrel = hasBarrelInPlay && !myPendingRow?.barrel_tried;
+
   const mustangIds = new Set(equipment.filter(e => e.card_type === 'mustang').map(e => e.player_id));
   const scopeIds = new Set(equipment.filter(e => e.card_type === 'scope').map(e => e.player_id));
   const equipmentFlags = { mustangIds, scopeIds };
@@ -191,7 +232,8 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const duelTargets = players.filter(p => p.is_alive && p.id !== playerId);
   const prisonTargets = players.filter(p => p.is_alive && p.id !== playerId && !p.is_sheriff && !equipment.some(e => e.player_id === p.id && e.card_type === 'prison'));
 
-  const canDraw = isMyTurn && !hasPending && game.turn_phase === 'draw';
+  const needsDegainer = isMyTurn && !hasPending && game.turn_phase === 'draw' && myEquipmentTypes.some(t => t === 'dynamite' || t === 'prison');
+  const canDraw = isMyTurn && !hasPending && game.turn_phase === 'draw' && !needsDegainer;
   const canAct = isMyTurn && !hasPending && game.turn_phase === 'play' && !discarding;
   const canPlayBang = canAct && targets.length > 0 && !me.has_played_bang_this_turn;
   const canPlayBeer = canAct && aliveCount > 2 && me.life_points < me.max_life_points;
@@ -205,11 +247,18 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const canPlayWellsFargo = canAct;
   const canPlayMustang = canAct && !myEquipmentTypes.includes('mustang');
   const canPlayScope = canAct && !myEquipmentTypes.includes('scope');
+  const canPlayPanic = canAct && targets.length > 0;
+  const canPlayCatBalou = canAct && duelTargets.length > 0;
+  const canPlayGatling = canAct;
+  const canPlayGeneralStore = canAct;
 
   const mustRespondToBang = myPendingRow && game.pending_type === 'bang_response';
+  const mustRespondToGatling = myPendingRow && game.pending_type === 'gatling_response';
   const mustRespondToDuel = myPendingRow?.is_current_turn && game.pending_type === 'duel_response';
   const mustRespondToIndians = myPendingRow && game.pending_type === 'indians_response';
-  const waitingOnOthers = hasPending && !mustRespondToBang && !mustRespondToDuel && !mustRespondToIndians;
+  const mustChooseCatBalouDiscard = myPendingRow && game.pending_type === 'cat_balou_discard';
+  const isMyStoreTurn = myPendingRow?.is_current_turn && game.pending_type === 'general_store';
+  const waitingOnOthers = hasPending && !mustRespondToBang && !mustRespondToGatling && !mustRespondToDuel && !mustRespondToIndians && !mustChooseCatBalouDiscard && game.pending_type !== 'general_store';
 
   const timerLabel = secondsLeft !== null ? `⏱ ${secondsLeft}s` : '';
 
@@ -230,6 +279,16 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
         </View>
       )}
 
+      {mustRespondToGatling && (
+        <View style={styles.pendingBox}>
+          <Text style={styles.pendingTitle}>Gatling ! Répondez : {timerLabel}</Text>
+          {hasMissed && <Button title="Jouer Raté!" onPress={() => handleRespondGatling('missed')} disabled={actionLoading} />}
+          {canTryBarrel && <Button title="Essayer la Planque" onPress={handleTryBarrelGatling} disabled={actionLoading} />}
+          <View style={styles.spacer} />
+          <Button title="Encaisser les dégâts" color="#a33" onPress={() => handleRespondGatling('accept_damage')} disabled={actionLoading} />
+        </View>
+      )}
+
       {mustRespondToDuel && (
         <View style={styles.pendingBox}>
           <Text style={styles.pendingTitle}>Duel ! Continuez ou encaissez : {timerLabel}</Text>
@@ -245,6 +304,33 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
           {hasBang && <Button title="Jouer Bang!" onPress={() => handleRespondIndians('discard_bang')} disabled={actionLoading} />}
           <View style={styles.spacer} />
           <Button title="Encaisser les dégâts" color="#a33" onPress={() => handleRespondIndians('accept_damage')} disabled={actionLoading} />
+        </View>
+      )}
+
+      {mustChooseCatBalouDiscard && (
+        <View style={styles.pendingBox}>
+          <Text style={styles.pendingTitle}>Coup de foudre ! Choisissez une carte à défausser (main ou en jeu) : {timerLabel}</Text>
+          {hand.map(c => (
+            <Button key={c.id} title={`${CARD_LABELS[c.card_type] ?? c.card_type} (main)`} onPress={() => handleRespondCatBalouHand(c.id)} disabled={actionLoading} />
+          ))}
+          {myEquipmentTypes.map(t => (
+            <Button key={t} title={`${CARD_LABELS[t] ?? t} (en jeu)`} onPress={() => handleRespondCatBalouEquip(t)} disabled={actionLoading} />
+          ))}
+        </View>
+      )}
+
+      {game.pending_type === 'general_store' && (
+        <View style={styles.pendingBox}>
+          {isMyStoreTurn ? (
+            <>
+              <Text style={styles.pendingTitle}>Magasin — choisissez une carte : {timerLabel}</Text>
+              {storeCards.map(c => (
+                <Button key={c.id} title={CARD_LABELS[c.card_type] ?? c.card_type} onPress={() => handlePickStoreCard(c.id)} disabled={actionLoading} />
+              ))}
+            </>
+          ) : (
+            <Text style={styles.pendingTitle}>Magasin en cours, en attente d'un autre joueur... {timerLabel}</Text>
+          )}
         </View>
       )}
 
@@ -274,6 +360,10 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
               {item.card_type === 'wells_fargo' && canPlayWellsFargo && <Button title="Jouer" onPress={handlePlayWellsFargo} disabled={actionLoading} />}
               {item.card_type === 'mustang' && canPlayMustang && <Button title="Jouer" onPress={handlePlayMustang} disabled={actionLoading} />}
               {item.card_type === 'scope' && canPlayScope && <Button title="Jouer" onPress={handlePlayScope} disabled={actionLoading} />}
+              {item.card_type === 'panic' && canPlayPanic && <Button title="Jouer" onPress={() => setPanicTargetPickerFor(item.id)} disabled={actionLoading} />}
+              {item.card_type === 'cat_balou' && canPlayCatBalou && <Button title="Jouer" onPress={() => setCatbalouTargetPickerFor(item.id)} disabled={actionLoading} />}
+              {item.card_type === 'gatling' && canPlayGatling && <Button title="Jouer" onPress={handlePlayGatling} disabled={actionLoading} />}
+              {item.card_type === 'general_store' && canPlayGeneralStore && <Button title="Jouer" onPress={handlePlayGeneralStore} disabled={actionLoading} />}
             </View>
           )}
           ListEmptyComponent={<Text style={styles.hint}>Main vide</Text>}
@@ -300,6 +390,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
         </>
       )}
 
+      {needsDegainer && <Button title="Dégainer" onPress={handleDegainer} disabled={actionLoading} />}
       {canDraw && <Button title="Piocher" onPress={handleDraw} disabled={actionLoading} />}
 
       {canAct && (
@@ -314,9 +405,13 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
           const tags = equipment.filter(e => e.player_id === item.id).map(e => EQUIPMENT_TAGS[e.card_type]).join(' ');
           const role = item.is_sheriff ? 'sheriff' : rolesMap[item.id];
           const roleLabel = !item.is_alive && role ? ` — ${ROLE_LABELS[role] ?? role}` : '';
+          const isOther = item.id !== playerId && item.is_alive;
+          const distTo = isOther ? computeDistance(players, playerId, item.id, equipmentFlags) : null;
+          const distFrom = isOther ? computeDistance(players, item.id, playerId, equipmentFlags) : null;
+          const distanceLabel = isOther ? ` · vous→lui: ${distTo} · lui→vous: ${distFrom}` : '';
           return (
             <Text style={styles.playerRow}>
-              Siège {item.seat_position}{item.is_sheriff ? ' 🎖️' : ''} — {item.is_alive ? `${item.life_points} PV` : 'éliminé' + roleLabel}{item.id === playerId ? ' (vous)' : ''} {tags}
+              Siège {item.seat_position}{item.is_sheriff ? ' 🎖️' : ''} — {item.is_alive ? `${item.life_points} PV` : 'éliminé' + roleLabel}{item.id === playerId ? ' (vous)' : ''} {tags}{distanceLabel}
             </Text>
           );
         }}
@@ -351,6 +446,46 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
             {prisonTargets.map(t => <Button key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayPrison(t.id)} />)}
             <View style={styles.spacer} />
             <Button title="Annuler" color="#999" onPress={() => setPrisonTargetPickerFor(null)} />
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={!!panicTargetPickerFor} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.subtitle}>Choisir une cible pour Braquage! (portée 1) :</Text>
+            {targets.map(t => (
+              <Button key={t.id} title={`Siège ${t.seat_position}`} onPress={() => { setPanicTargetPickerFor(null); setStealFlow({ targetId: t.id }); }} />
+            ))}
+            <View style={styles.spacer} />
+            <Button title="Annuler" color="#999" onPress={() => setPanicTargetPickerFor(null)} />
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={!!catbalouTargetPickerFor} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.subtitle}>Choisir une cible pour Coup de foudre :</Text>
+            {duelTargets.map(t => (
+              <Button key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayCatBalou(t.id)} />
+            ))}
+            <View style={styles.spacer} />
+            <Button title="Annuler" color="#999" onPress={() => setCatbalouTargetPickerFor(null)} />
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={!!stealFlow} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.subtitle}>Voler quelle carte ?</Text>
+            <Button title="Carte au hasard en main" onPress={() => handleSteal('hand')} disabled={actionLoading} />
+            {equipment.filter(e => e.player_id === stealFlow?.targetId).map(e => (
+              <Button key={e.card_type} title={`${CARD_LABELS[e.card_type] ?? e.card_type} (en jeu)`} onPress={() => handleSteal('in_play', e.card_type)} disabled={actionLoading} />
+            ))}
+            <View style={styles.spacer} />
+            <Button title="Annuler" color="#999" onPress={() => setStealFlow(null)} />
           </View>
         </View>
       </Modal>
