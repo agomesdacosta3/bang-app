@@ -1,4 +1,5 @@
 import { supabaseAdmin } from './supabaseAdmin.ts';
+import { logEvent } from './events.ts';
 
 export async function pickGeneralStoreCard(gameId: string, playerId: string, cardId?: string) {
   let card;
@@ -14,6 +15,9 @@ export async function pickGeneralStoreCard(gameId: string, playerId: string, car
   await supabaseAdmin.from('general_store_cards').delete().eq('id', card.id);
   await supabaseAdmin.from('hand_cards').insert({ player_id: playerId, card_type: card.card_type, suit: card.suit, value: card.value });
   await supabaseAdmin.from('pending_targets').delete().eq('game_id', gameId).eq('player_id', playerId);
+
+  const { data: player } = await supabaseAdmin.from('players').select('seat_position').eq('id', playerId).single();
+  await logEvent(gameId, 'store_card_taken', { actorSeat: player!.seat_position, cardType: card.card_type });
 
   const { data: remaining } = await supabaseAdmin.from('pending_targets').select('*').eq('game_id', gameId).order('order_index');
   if (!remaining || remaining.length === 0) {

@@ -30,7 +30,7 @@ serve(async (req) => {
     if (!prisonCard) throw new Error('Vous n’avez pas de carte Prison en main');
 
     await supabaseAdmin.from('hand_cards').delete().eq('id', prisonCard.id);
-    await supabaseAdmin.from('cards_in_play').insert({ player_id: target.id, card_type: 'prison' });
+    await supabaseAdmin.from('cards_in_play').insert({ player_id: target.id, card_type: 'prison', suit: prisonCard.suit, value: prisonCard.value });
 
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {

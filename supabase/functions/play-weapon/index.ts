@@ -1,5 +1,6 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
+import { WEAPON_TYPES } from '../_shared/weapons.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 
 serve(async (req) => {
@@ -9,7 +10,9 @@ serve(async (req) => {
     const { data: { user } } = await supabaseAdmin.auth.getUser(token);
     if (!user) throw new Error('Non authentifié');
 
-    const { gameId } = await req.json();
+    const { gameId, cardType } = await req.json();
+    if (!WEAPON_TYPES.includes(cardType)) throw new Error('Arme invalide');
+
     const { data: game } = await supabaseAdmin.from('games').select('*').eq('id', gameId).single();
     if (!game || game.status !== 'in_progress' || game.turn_phase !== 'play') throw new Error('Ce n’est pas le moment de jouer une carte');
     if (game.pending_type) throw new Error('Une réponse est déjà en attente');
@@ -19,14 +22,17 @@ serve(async (req) => {
     if (!me) throw new Error('Vous ne participez pas à cette partie');
     if (game.current_player_id !== me.id) throw new Error('Ce n’est pas votre tour');
 
-    const { data: existing } = await supabaseAdmin.from('cards_in_play').select('id').eq('player_id', me.id).eq('card_type', 'barrel').maybeSingle();
-    if (existing) throw new Error('Vous avez déjà une Planque en jeu');
+    const { data: weaponCard } = await supabaseAdmin.from('hand_cards').select('id, suit, value').eq('player_id', me.id).eq('card_type', cardType).limit(1).single();
+    if (!weaponCard) throw new Error('Vous n’avez pas cette arme en main');
 
-    const { data: barrelCard } = await supabaseAdmin.from('hand_cards').select('id, suit, value').eq('player_id', me.id).eq('card_type', 'barrel').limit(1).single();
-    if (!barrelCard) throw new Error('Vous n’avez pas de carte Planque en main');
+    const { data: currentWeapon } = await supabaseAdmin.from('cards_in_play').select('id, card_type, suit, value').eq('player_id', me.id).in('card_type', WEAPON_TYPES).maybeSingle();
+    if (currentWeapon) {
+      await supabaseAdmin.from('cards_in_play').delete().eq('id', currentWeapon.id);
+      await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: currentWeapon.card_type, suit: currentWeapon.suit, value: currentWeapon.value });
+    }
 
-    await supabaseAdmin.from('hand_cards').delete().eq('id', barrelCard.id);
-    await supabaseAdmin.from('cards_in_play').insert({ player_id: me.id, card_type: 'barrel', suit: barrelCard.suit, value: barrelCard.value });
+    await supabaseAdmin.from('hand_cards').delete().eq('id', weaponCard.id);
+    await supabaseAdmin.from('cards_in_play').insert({ player_id: me.id, card_type: cardType, suit: weaponCard.suit, value: weaponCard.value });
 
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {

@@ -1,0 +1,1 @@
+select * from hand_cards order by created_at desc limit 5;

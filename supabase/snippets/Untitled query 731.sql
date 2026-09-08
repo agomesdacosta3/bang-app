@@ -1,1 +1,1 @@
-insert into hand_cards (player_id, card_type, suit, value) values ('61b4cc4d-e1c3-4319-9d7d-152a3ed1c548', 'cat_balou', 'hearts', 5);
+insert into hand_cards (player_id, card_type, suit, value) values ('e8071104-7d11-4be9-a7a8-c0465a848eb2', 'scope', 'hearts', 5);

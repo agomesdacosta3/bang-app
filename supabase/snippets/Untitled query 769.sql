@@ -1,0 +1,1 @@
+select * from cards_in_play ;

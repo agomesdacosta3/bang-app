@@ -664,3 +664,14 @@ entrypoint = "./functions/resolve-start-of-turn/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/resolve-start-of-turn/*.html" ]
+
+[functions.play-weapon]
+enabled = true
+verify_jwt = false
+import_map = "./functions/play-weapon/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/play-weapon/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/play-weapon/*.html" ]

@@ -19,17 +19,18 @@ serve(async (req) => {
     const { data: me } = await supabaseAdmin.from('players').select('*').eq('game_id', gameId).eq('user_id', user.id).single();
     if (!me || game.current_player_id !== me.id) throw new Error('Ce n’est pas votre tour');
 
-    const { data: equipment } = await supabaseAdmin.from('cards_in_play').select('card_type').eq('player_id', me.id);
-    const hasDynamite = equipment?.some(c => c.card_type === 'dynamite');
-    const hasPrison = equipment?.some(c => c.card_type === 'prison');
-    if (!hasDynamite && !hasPrison) throw new Error('Rien à dégainer');
+    const { data: equipment } = await supabaseAdmin.from('cards_in_play').select('id, card_type, suit, value').eq('player_id', me.id);
+    const dynamiteRow = equipment?.find(c => c.card_type === 'dynamite');
+    const prisonRow = equipment?.find(c => c.card_type === 'prison');
+    if (!dynamiteRow && !prisonRow) throw new Error('Rien à dégainer');
 
-    if (hasDynamite) {
+    if (dynamiteRow) {
       const drawn = await degainer(gameId);
-      await supabaseAdmin.from('cards_in_play').delete().eq('player_id', me.id).eq('card_type', 'dynamite');
+      await supabaseAdmin.from('cards_in_play').delete().eq('id', dynamiteRow.id);
       const explodes = drawn.suit === 'spades' && drawn.value >= 2 && drawn.value <= 9;
 
       if (explodes) {
+        await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'dynamite', suit: dynamiteRow.suit, value: dynamiteRow.value });
         await applyDamage(gameId, me.id, 3);
         const { data: after } = await supabaseAdmin.from('players').select('is_alive').eq('id', me.id).single();
         if (!after!.is_alive) {
@@ -41,13 +42,14 @@ serve(async (req) => {
         const alive = allPlayers!.filter(p => p.is_alive);
         const myIndex = alive.findIndex(p => p.id === me.id);
         const leftNeighbor = alive[(myIndex + 1) % alive.length];
-        await supabaseAdmin.from('cards_in_play').insert({ player_id: leftNeighbor.id, card_type: 'dynamite' });
+        await supabaseAdmin.from('cards_in_play').insert({ player_id: leftNeighbor.id, card_type: 'dynamite', suit: dynamiteRow.suit, value: dynamiteRow.value });
       }
     }
 
-    if (hasPrison) {
+    if (prisonRow) {
       const drawn = await degainer(gameId);
-      await supabaseAdmin.from('cards_in_play').delete().eq('player_id', me.id).eq('card_type', 'prison');
+      await supabaseAdmin.from('cards_in_play').delete().eq('id', prisonRow.id);
+      await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'prison', suit: prisonRow.suit, value: prisonRow.value });
       if (drawn.suit !== 'hearts') {
         const next = await advanceTurn(gameId, me.id);
         return new Response(JSON.stringify({ ok: true, skippedTurn: true, turnEnded: true, nextPlayerId: next.id }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

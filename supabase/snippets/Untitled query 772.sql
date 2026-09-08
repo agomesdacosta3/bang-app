@@ -1,0 +1,1 @@
+select * from hand_cards where player_id = '0a1f9ea2-64a8-4117-b7aa-c7fd89d85ec4' and card_type = 'dynamite';

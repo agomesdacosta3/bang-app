@@ -26,7 +26,7 @@ serve(async (req) => {
     if (!dynamiteCard) throw new Error('Vous n’avez pas de carte Dynamite en main');
 
     await supabaseAdmin.from('hand_cards').delete().eq('id', dynamiteCard.id);
-    await supabaseAdmin.from('cards_in_play').insert({ player_id: me.id, card_type: 'dynamite' });
+    await supabaseAdmin.from('cards_in_play').insert({ player_id: me.id, card_type: 'dynamite', suit: dynamiteCard.suit, value: dynamiteCard.value });
 
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {

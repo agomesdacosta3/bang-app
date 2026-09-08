@@ -10,6 +10,15 @@ if (!JOIN_CODE) {
   process.exit(1);
 }
 
+const WEAPON_RANGES = { schofield: 2, remington: 3, carbine: 4, winchester: 5, volcanic: 1 };
+function getWeaponRange(types) {
+  const weapon = types.find(t => WEAPON_RANGES[t]);
+  return weapon ? WEAPON_RANGES[weapon] : 1;
+}
+
+const BOT_DELAY_MS = 3000;
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
 async function call(fn, token, body) {
   const res = await fetch(`${LOCAL_URL}/functions/v1/${fn}`, {
     method: 'POST',
@@ -100,19 +109,23 @@ async function passTurn(bot, gameId, bots) {
   const { data: allEquipment } = await bot.client.from('cards_in_play').select('player_id, card_type');
   const mustangIds = new Set((allEquipment ?? []).filter(e => e.card_type === 'mustang').map(e => e.player_id));
   const scopeIds = new Set((allEquipment ?? []).filter(e => e.card_type === 'scope').map(e => e.player_id));
+  const myTypes = (allEquipment ?? []).filter(e => e.player_id === bot.playerId).map(e => e.card_type);
+  const myWeaponRange = getWeaponRange(myTypes);
 
   const bangCard = hand.find(c => c.card_type === 'bang');
   if (bangCard) {
-    const targets = allPlayers.filter(p => p.is_alive && p.id !== bot.playerId && computeDistance(allPlayers, bot.playerId, p.id, mustangIds, scopeIds) <= 1);
+    const targets = allPlayers.filter(p => p.is_alive && p.id !== bot.playerId && computeDistance(allPlayers, bot.playerId, p.id, mustangIds, scopeIds) <= myWeaponRange);
     if (targets.length > 0) {
       const target = targets[Math.floor(Math.random() * targets.length)];
       try {
         console.log(`  → siège ${bot.seat} attaque le siège ${target.seat_position} !`);
         await call('play-bang', bot.token, { gameId, targetPlayerId: target.id });
+        await sleep(BOT_DELAY_MS);
 
         const targetBot = bots.find(b => b.playerId === target.id);
         if (targetBot) {
           await respondIfPending(targetBot, gameId);
+          await sleep(BOT_DELAY_MS);
         } else {
           for (let i = 0; i < 30; i++) {
             await new Promise(r => setTimeout(r, 1000));
@@ -158,7 +171,7 @@ async function run() {
         const bot = bots.find(b => b.playerId === row.player_id);
         if (bot) await respondIfPending(bot, gameId);
       }
-      await new Promise(r => setTimeout(r, 1000));
+      await sleep(BOT_DELAY_MS);
       continue;
     }
 
@@ -173,7 +186,7 @@ async function run() {
           await call('pick-general-store-card', bot.token, { gameId, cardId: choice.id });
         }
       }
-      await new Promise(r => setTimeout(r, 1000));
+      await sleep(BOT_DELAY_MS);
       continue;
     }
 
@@ -185,6 +198,7 @@ async function run() {
 
     console.log(`Passage du tour — siège ${bot.seat}...`);
     await passTurn(bot, gameId, bots);
+    await sleep(BOT_DELAY_MS);
   }
 }
 

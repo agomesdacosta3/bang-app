@@ -7,8 +7,6 @@ const ROLE_SETUP: Record<number, { outlaws: number; deputies: number }> = {
   6: { outlaws: 3, deputies: 1 }, 7: { outlaws: 3, deputies: 2 },
 };
 
-const SUITS = ['hearts', 'diamonds', 'clubs', 'spades'];
-
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -18,28 +16,135 @@ function shuffle<T>(arr: T[]): T[] {
   return a;
 }
 
-function randomCard(type: string) {
-  return { type, suit: SUITS[Math.floor(Math.random() * 4)], value: 2 + Math.floor(Math.random() * 13) };
-}
-
+// Composition exacte du deck officiel (80 cartes). Valeurs : 2-10 = 2-10, J = 11, Q = 12, K = 13, A = 14.
 function buildDeck(): { type: string; suit: string; value: number }[] {
-  const types = [
-    ...Array(20).fill('bang'),
-    ...Array(10).fill('missed'),
-    ...Array(6).fill('beer'),
-    ...Array(3).fill('duel'),
-    ...Array(2).fill('indians'),
-    ...Array(1).fill('saloon'),
-    ...Array(2).fill('stagecoach'),
-    ...Array(1).fill('wells_fargo'),
-    ...Array(2).fill('mustang'),
-    ...Array(1).fill('scope'),
-    ...Array(4).fill('panic'),
-    ...Array(4).fill('cat_balou'),
-    ...Array(1).fill('gatling'),
-    ...Array(2).fill('general_store'),
+  const deck: { type: string; suit: string; value: number }[] = [
+    // Raté! (12)
+    { type: 'missed', suit: 'spades', value: 2 },
+    { type: 'missed', suit: 'spades', value: 3 },
+    { type: 'missed', suit: 'spades', value: 4 },
+    { type: 'missed', suit: 'spades', value: 5 },
+    { type: 'missed', suit: 'spades', value: 6 },
+    { type: 'missed', suit: 'spades', value: 7 },
+    { type: 'missed', suit: 'spades', value: 8 },
+    { type: 'missed', suit: 'clubs', value: 14 },
+    { type: 'missed', suit: 'clubs', value: 10 },
+    { type: 'missed', suit: 'clubs', value: 12 },
+    { type: 'missed', suit: 'clubs', value: 11 },
+    { type: 'missed', suit: 'clubs', value: 13 },
+
+    // Magasin (2)
+    { type: 'general_store', suit: 'spades', value: 12 },
+    { type: 'general_store', suit: 'clubs', value: 9 },
+
+    // Coup de foudre (4)
+    { type: 'cat_balou', suit: 'hearts', value: 13 },
+    { type: 'cat_balou', suit: 'diamonds', value: 9 },
+    { type: 'cat_balou', suit: 'diamonds', value: 10 },
+    { type: 'cat_balou', suit: 'diamonds', value: 11 },
+
+    // Bières (6)
+    { type: 'beer', suit: 'hearts', value: 6 },
+    { type: 'beer', suit: 'hearts', value: 7 },
+    { type: 'beer', suit: 'hearts', value: 8 },
+    { type: 'beer', suit: 'hearts', value: 9 },
+    { type: 'beer', suit: 'hearts', value: 10 },
+    { type: 'beer', suit: 'hearts', value: 11 },
+
+    // Gatling (1)
+    { type: 'gatling', suit: 'hearts', value: 10 },
+
+    // Saloon (1)
+    { type: 'saloon', suit: 'hearts', value: 5 },
+
+    // Diligence (1)
+    { type: 'stagecoach', suit: 'hearts', value: 3 },
+
+    // Convoi (2)
+    { type: 'wells_fargo', suit: 'spades', value: 9 },
+    { type: 'wells_fargo', suit: 'spades', value: 9 },
+
+    // Duel (3)
+    { type: 'duel', suit: 'diamonds', value: 12 },
+    { type: 'duel', suit: 'spades', value: 11 },
+    { type: 'duel', suit: 'clubs', value: 8 },
+
+    // Indiens! (2)
+    { type: 'indians', suit: 'diamonds', value: 14 },
+    { type: 'indians', suit: 'diamonds', value: 13 },
+
+    // Braquage! (4)
+    { type: 'panic', suit: 'hearts', value: 14 },
+    { type: 'panic', suit: 'hearts', value: 11 },
+    { type: 'panic', suit: 'hearts', value: 12 },
+    { type: 'panic', suit: 'diamonds', value: 8 },
+
+    // Bang! (25)
+    { type: 'bang', suit: 'spades', value: 14 },
+    { type: 'bang', suit: 'hearts', value: 14 },
+    { type: 'bang', suit: 'hearts', value: 12 },
+    { type: 'bang', suit: 'hearts', value: 13 },
+    { type: 'bang', suit: 'clubs', value: 2 },
+    { type: 'bang', suit: 'clubs', value: 3 },
+    { type: 'bang', suit: 'clubs', value: 4 },
+    { type: 'bang', suit: 'clubs', value: 5 },
+    { type: 'bang', suit: 'clubs', value: 6 },
+    { type: 'bang', suit: 'clubs', value: 7 },
+    { type: 'bang', suit: 'clubs', value: 8 },
+    { type: 'bang', suit: 'clubs', value: 9 },
+    { type: 'bang', suit: 'diamonds', value: 2 },
+    { type: 'bang', suit: 'diamonds', value: 3 },
+    { type: 'bang', suit: 'diamonds', value: 4 },
+    { type: 'bang', suit: 'diamonds', value: 5 },
+    { type: 'bang', suit: 'diamonds', value: 6 },
+    { type: 'bang', suit: 'diamonds', value: 7 },
+    { type: 'bang', suit: 'diamonds', value: 8 },
+    { type: 'bang', suit: 'diamonds', value: 9 },
+    { type: 'bang', suit: 'diamonds', value: 10 },
+    { type: 'bang', suit: 'diamonds', value: 11 },
+    { type: 'bang', suit: 'diamonds', value: 12 },
+    { type: 'bang', suit: 'diamonds', value: 13 },
+    { type: 'bang', suit: 'diamonds', value: 14 },
+
+    // Dynamite (1)
+    { type: 'dynamite', suit: 'hearts', value: 2 },
+
+    // Prison (3)
+    { type: 'prison', suit: 'hearts', value: 4 },
+    { type: 'prison', suit: 'spades', value: 11 },
+    { type: 'prison', suit: 'spades', value: 10 },
+
+    // Lunette (1)
+    { type: 'scope', suit: 'spades', value: 14 },
+
+    // Mustang (2)
+    { type: 'mustang', suit: 'hearts', value: 8 },
+    { type: 'mustang', suit: 'hearts', value: 9 },
+
+    // Planque (2)
+    { type: 'barrel', suit: 'spades', value: 13 },
+    { type: 'barrel', suit: 'spades', value: 12 },
+
+    // Winchester (1)
+    { type: 'winchester', suit: 'spades', value: 8 },
+
+    // Carabine (1)
+    { type: 'carbine', suit: 'clubs', value: 14 },
+
+    // Remington (1)
+    { type: 'remington', suit: 'clubs', value: 13 },
+
+    // Schofield (3)
+    { type: 'schofield', suit: 'spades', value: 13 },
+    { type: 'schofield', suit: 'clubs', value: 11 },
+    { type: 'schofield', suit: 'clubs', value: 12 },
+
+    // Volcanic (2)
+    { type: 'volcanic', suit: 'spades', value: 10 },
+    { type: 'volcanic', suit: 'clubs', value: 10 },
   ];
-  return shuffle(types.map(randomCard));
+
+  return shuffle(deck);
 }
 
 serve(async (req) => {

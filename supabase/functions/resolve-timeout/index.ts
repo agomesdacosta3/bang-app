@@ -3,7 +3,7 @@ import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
 import { applyDamage } from '../_shared/applyDamage.ts';
 import { clearPending } from '../_shared/pending.ts';
 import { pickGeneralStoreCard } from '../_shared/generalStore.ts';
-import { randomSuitValue } from '../_shared/cardIdentity.ts';
+import { logEvent } from '../_shared/events.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 
 serve(async (req) => {
@@ -20,8 +20,9 @@ serve(async (req) => {
       await pickGeneralStoreCard(gameId, current!.player_id);
     } else if (game.pending_type === 'cat_balou_discard') {
       const { data: targetRow } = await supabaseAdmin.from('pending_targets').select('player_id').eq('game_id', gameId).eq('is_current_turn', true).single();
+      const { data: targetPlayer } = await supabaseAdmin.from('players').select('seat_position').eq('id', targetRow!.player_id).single();
       const { data: hand } = await supabaseAdmin.from('hand_cards').select('id, card_type, suit, value').eq('player_id', targetRow!.player_id);
-      const { data: equip } = await supabaseAdmin.from('cards_in_play').select('id, card_type').eq('player_id', targetRow!.player_id);
+      const { data: equip } = await supabaseAdmin.from('cards_in_play').select('id, card_type, suit, value').eq('player_id', targetRow!.player_id);
       const pool = [
         ...(hand ?? []).map(c => ({ kind: 'hand' as const, ...c })),
         ...(equip ?? []).map(c => ({ kind: 'equip' as const, ...c })),
@@ -30,12 +31,11 @@ serve(async (req) => {
         const pick = pool[Math.floor(Math.random() * pool.length)];
         if (pick.kind === 'hand') {
           await supabaseAdmin.from('hand_cards').delete().eq('id', pick.id);
-          await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: pick.card_type, suit: pick.suit, value: pick.value });
         } else {
           await supabaseAdmin.from('cards_in_play').delete().eq('id', pick.id);
-          const rv = randomSuitValue();
-          await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: pick.card_type, suit: rv.suit, value: rv.value });
         }
+        await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: pick.card_type, suit: pick.suit, value: pick.value });
+        await logEvent(gameId, 'card_discarded_forced', { actorSeat: targetPlayer!.seat_position, cardType: pick.card_type });
       }
       await clearPending(gameId);
     } else {

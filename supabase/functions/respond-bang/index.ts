@@ -4,6 +4,8 @@ import { applyDamage } from '../_shared/applyDamage.ts';
 import { clearPending } from '../_shared/pending.ts';
 import { degainer } from '../_shared/degainer.ts';
 import { corsHeaders } from '../_shared/cors.ts';
+import { logEvent } from '../_shared/events.ts';
+
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -25,6 +27,7 @@ serve(async (req) => {
       if (!missedCard) throw new Error('Vous n’avez pas de carte Raté!');
       await supabaseAdmin.from('hand_cards').delete().eq('id', missedCard.id);
       await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'missed', suit: missedCard.suit, value: missedCard.value });
+      await logEvent(gameId, 'missed_played', { actorSeat: me!.seat_position });
       await clearPending(gameId);
     } else if (action === 'try_barrel') {
       if (myPending.barrel_tried) throw new Error('Vous avez déjà essayé la Planque pour ce tir');
@@ -38,6 +41,7 @@ serve(async (req) => {
         return new Response(JSON.stringify({ ok: true, barrelWorked: false, drawnSuit: drawn.suit }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
       await clearPending(gameId);
+      await logEvent(gameId, 'barrel_used', { actorSeat: me!.seat_position });
     } else if (action === 'accept_damage') {
       await applyDamage(gameId, me!.id);
       await clearPending(gameId);

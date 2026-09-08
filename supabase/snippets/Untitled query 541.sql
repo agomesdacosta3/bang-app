@@ -1,0 +1,1 @@
+select * from discard_pile order by discarded_at desc limit 5 ;
