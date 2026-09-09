@@ -4,11 +4,11 @@ export async function startPending(
   gameId: string,
   initiatorId: string,
   type: string,
-  targets: { playerId: string; isCurrentTurn: boolean }[],
+  targets: { playerId: string; isCurrentTurn: boolean; cancelsNeeded?: number }[],
   timeoutMs = 20000
 ) {
   await supabaseAdmin.from('pending_targets').insert(
-    targets.map(t => ({ game_id: gameId, player_id: t.playerId, is_current_turn: t.isCurrentTurn }))
+    targets.map(t => ({ game_id: gameId, player_id: t.playerId, is_current_turn: t.isCurrentTurn, cancels_needed: t.cancelsNeeded ?? 1 }))
   );
   await supabaseAdmin.from('games').update({
     pending_type: type,

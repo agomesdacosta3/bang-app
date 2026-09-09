@@ -2,8 +2,8 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
 import { applyDamage } from '../_shared/applyDamage.ts';
 import { logEvent } from '../_shared/events.ts';
+import { checkSuzyLafayette, getCharacter } from '../_shared/characters.ts';
 import { corsHeaders } from '../_shared/cors.ts';
-import { checkSuzyLafayette } from '../_shared/characters.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -12,7 +12,7 @@ serve(async (req) => {
     const { data: { user } } = await supabaseAdmin.auth.getUser(token);
     if (!user) throw new Error('Non authentifié');
 
-    const { gameId, action } = await req.json();
+    const { gameId, action, cardType } = await req.json(); // action: 'discard_bang' | 'accept_damage'
     const { data: game } = await supabaseAdmin.from('games').select('*').eq('id', gameId).single();
     if (!game || game.pending_type !== 'indians_response') throw new Error('Aucun Indiens! en attente');
 
@@ -21,10 +21,14 @@ serve(async (req) => {
     if (!myPending) throw new Error('Vous n’avez pas à répondre à cet Indiens!');
 
     if (action === 'discard_bang') {
-      const { data: bangCard } = await supabaseAdmin.from('hand_cards').select('id, suit, value').eq('player_id', me!.id).eq('card_type', 'bang').limit(1).single();
-      if (!bangCard) throw new Error('Vous n’avez pas de carte Bang!');
+      const character = await getCharacter(me!.id);
+      const useMissed = cardType === 'missed' && character === 'calamity_janet';
+      const searchType = useMissed ? 'missed' : 'bang';
+
+      const { data: bangCard } = await supabaseAdmin.from('hand_cards').select('id, suit, value').eq('player_id', me!.id).eq('card_type', searchType).limit(1).single();
+      if (!bangCard) throw new Error(useMissed ? 'Vous n’avez pas de carte Raté!' : 'Vous n’avez pas de carte Bang!');
       await supabaseAdmin.from('hand_cards').delete().eq('id', bangCard.id);
-      await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'bang', suit: bangCard.suit, value: bangCard.value });
+      await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: searchType, suit: bangCard.suit, value: bangCard.value });
       await logEvent(gameId, 'indians_defended', { actorSeat: me!.seat_position });
       await checkSuzyLafayette(gameId, me!.id);
     } else if (action === 'accept_damage') {

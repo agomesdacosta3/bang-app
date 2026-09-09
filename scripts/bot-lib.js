@@ -95,6 +95,7 @@ function formatEventConsole(e) {
     case 'jesse_jones_steal': return `Siège ${e.actor_seat} pioche dans la main de Siège ${e.target_seat} (Jesse Jones)`;
     case 'pedro_ramirez_discard_draw': return `Siège ${e.actor_seat} pioche depuis la défausse : ${CARD_LABELS_CONSOLE[e.card_type] ?? e.card_type} (Pedro Ramirez)`;
     case 'kit_carlson_pick': return `Siège ${e.actor_seat} choisit 2 cartes parmi 3 (Kit Carlson)`;
+    case 'partial_cancel': return `Siège ${e.actor_seat} annule partiellement (${e.amount}/2) — Slab le Flingueur`;
     default: return e.event_type;
   }
 }
@@ -166,12 +167,11 @@ async function respondIfPending(bot, gameId, pollEvents) {
   return true;
 }
 
-async function passTurn(bot, gameId, bots, turnPhase, pollEvents) {
+async function passTurn(bot, gameId, bots, turnPhase) {
   if (turnPhase === 'draw') {
     const { data: equipment } = await bot.client.from('cards_in_play').select('card_type').eq('player_id', bot.playerId);
     if (equipment?.some(c => c.card_type === 'dynamite' || c.card_type === 'prison')) {
       const startResult = await call('resolve-start-of-turn', bot.token, { gameId });
-      if (pollEvents) await pollEvents();
       if (startResult.turnEnded) return;
     }
     await call('draw-cards', bot.token, { gameId });
@@ -180,42 +180,66 @@ async function passTurn(bot, gameId, bots, turnPhase, pollEvents) {
   const { data: allPlayers } = await bot.client.from('players').select('id, seat_position, is_alive').eq('game_id', gameId);
   const { data: hand } = await bot.client.from('hand_cards').select('id, card_type').eq('player_id', bot.playerId);
 
-  const { data: allEquipment } = await bot.client.from('cards_in_play').select('player_id, card_type');
-  const { data: allCharacters } = await bot.client.from('player_characters').select('player_id, character');
-  const mustangIds = new Set((allEquipment ?? []).filter(e => e.card_type === 'mustang').map(e => e.player_id));
-  const scopeIds = new Set((allEquipment ?? []).filter(e => e.card_type === 'scope').map(e => e.player_id));
-  (allCharacters ?? []).forEach(c => {
-    if (c.character === 'paul_regret') mustangIds.add(c.player_id);
-    if (c.character === 'rose_doolan') scopeIds.add(c.player_id);
-  });
-  const myTypes = (allEquipment ?? []).filter(e => e.player_id === bot.playerId).map(e => e.card_type);
-  const myWeaponRange = getWeaponRange(myTypes);
+  if (bot.forcedAction) {
+    const { type, targetSeat } = bot.forcedAction;
+    delete bot.forcedAction;
+    try {
+      if (type === 'duel') {
+        const target = allPlayers.find(p => p.seat_position === targetSeat);
+        if (!target) throw new Error(`Aucun joueur au siège ${targetSeat}`);
+        console.log(`  → siège ${bot.seat} lance un Duel sur siège ${targetSeat} (forcé)`);
+        await call('play-duel', bot.token, { gameId, targetPlayerId: target.id });
+      } else if (type === 'indians') {
+        console.log(`  → siège ${bot.seat} joue Indiens! (forcé)`);
+        await call('play-indians', bot.token, { gameId });
+      }
+      await sleep(BOT_DELAY_MS);
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 1000));
+        const { data: g } = await bot.client.from('games').select('pending_type').eq('id', gameId).single();
+        if (!g.pending_type) break;
+        if (i === 25) await call('resolve-timeout', bot.token, { gameId });
+      }
+    } catch (err) {
+      console.log(`  → action forcée annulée : ${err.message}`);
+    }
+  } else {
+    const { data: allEquipment } = await bot.client.from('cards_in_play').select('player_id, card_type');
+    const { data: allCharacters } = await bot.client.from('player_characters').select('player_id, character');
+    const mustangIds = new Set((allEquipment ?? []).filter(e => e.card_type === 'mustang').map(e => e.player_id));
+    const scopeIds = new Set((allEquipment ?? []).filter(e => e.card_type === 'scope').map(e => e.player_id));
+    (allCharacters ?? []).forEach(c => {
+      if (c.character === 'paul_regret') mustangIds.add(c.player_id);
+      if (c.character === 'rose_doolan') scopeIds.add(c.player_id);
+    });
+    const myTypes = (allEquipment ?? []).filter(e => e.player_id === bot.playerId).map(e => e.card_type);
+    const myWeaponRange = getWeaponRange(myTypes);
 
-  const bangCard = hand.find(c => c.card_type === 'bang');
-  if (bangCard) {
-    const targets = allPlayers.filter(p => p.is_alive && p.id !== bot.playerId && computeDistance(allPlayers, bot.playerId, p.id, mustangIds, scopeIds) <= myWeaponRange);
-    if (targets.length > 0) {
-      const target = targets[Math.floor(Math.random() * targets.length)];
-      try {
-        await call('play-bang', bot.token, { gameId, targetPlayerId: target.id });
-        if (pollEvents) await pollEvents();
-        await sleep(BOT_DELAY_MS);
-
-        const targetBot = bots.find(b => b.playerId === target.id);
-        if (targetBot) {
-          await respondIfPending(targetBot, gameId, pollEvents);
+    const bangCard = hand.find(c => c.card_type === 'bang');
+    if (bangCard) {
+      const targets = allPlayers.filter(p => p.is_alive && p.id !== bot.playerId && computeDistance(allPlayers, bot.playerId, p.id, mustangIds, scopeIds) <= myWeaponRange);
+      if (targets.length > 0) {
+        const target = targets[Math.floor(Math.random() * targets.length)];
+        try {
+          console.log(`  → siège ${bot.seat} attaque le siège ${target.seat_position} !`);
+          await call('play-bang', bot.token, { gameId, targetPlayerId: target.id });
           await sleep(BOT_DELAY_MS);
-        } else {
-          for (let i = 0; i < 30; i++) {
-            await new Promise(r => setTimeout(r, 1000));
-            if (pollEvents) await pollEvents();
-            const { data: g } = await bot.client.from('games').select('pending_type').eq('id', gameId).single();
-            if (!g.pending_type) break;
-            if (i === 25) await call('resolve-timeout', bot.token, { gameId });
+
+          const targetBot = bots.find(b => b.playerId === target.id);
+          if (targetBot) {
+            await respondIfPending(targetBot, gameId);
+            await sleep(BOT_DELAY_MS);
+          } else {
+            for (let i = 0; i < 30; i++) {
+              await new Promise(r => setTimeout(r, 1000));
+              const { data: g } = await bot.client.from('games').select('pending_type').eq('id', gameId).single();
+              if (!g.pending_type) break;
+              if (i === 25) await call('resolve-timeout', bot.token, { gameId });
+            }
           }
+        } catch (err) {
+          console.log(`  → attaque annulée : ${err.message}`);
         }
-      } catch (err) {
-        console.log(`  → attaque annulée : ${err.message}`);
       }
     }
   }
@@ -225,7 +249,6 @@ async function passTurn(bot, gameId, bots, turnPhase, pollEvents) {
   const excess = freshHand.length - me.life_points;
   const cardIds = excess > 0 ? freshHand.slice(0, excess).map(c => c.id) : [];
   await call('discard-cards', bot.token, { gameId, cardIds });
-  if (pollEvents) await pollEvents();
 }
 
 async function runGameLoop(admin, gameId, bots) {

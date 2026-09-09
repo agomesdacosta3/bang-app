@@ -27,8 +27,15 @@ if (!JOIN_CODE) {
 //             kit_carlson, lucky_duke, paul_regret, pedro_ramirez, rose_doolan, sid_ketchum,
 //             slab_the_killer, suzy_lafayette, vulture_sam, willy_the_kid
 // hand : liste de card_type, ou d'objets { type, suit, value } pour une carte précise
+// forcedAction : { type: 'duel' | 'indians', targetSeat? } — force ce bot à jouer cette carte
+//                une seule fois, à son prochain tour, avant de reprendre un comportement normal
+//                (targetSeat requis pour 'duel', ignoré pour 'indians')
 
-const RIG = { 0: { character: 'kit_carlson' } };
+const RIG = {
+  0: { character: 'calamity_janet', hand: ['missed'] },
+  1: { hand: ['indians'], forcedAction: { type: 'indians' } },
+};
+
 
 const CHARACTER_BASE_LIFE = { paul_regret: 3, el_gringo: 3 };
 const SUITS = ['hearts', 'diamonds', 'clubs', 'spades'];
@@ -95,6 +102,14 @@ async function run() {
       });
       await admin.from('cards_in_play').insert(itemsToInsert);
       console.log(`Siège ${seat} → équipement forcé (en jeu) : ${rig.inPlay.map(c => (typeof c === 'string' ? c : c.type)).join(', ')}`);
+    }
+
+    if (rig.forcedAction) {
+      const bot = bots.find(b => b.seat === seat);
+      if (bot) {
+        bot.forcedAction = rig.forcedAction;
+        console.log(`Siège ${seat} → action forcée programmée : ${rig.forcedAction.type}`);
+      }
     }
   }
 
