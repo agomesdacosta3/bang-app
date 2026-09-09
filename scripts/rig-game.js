@@ -27,8 +27,8 @@ if (!JOIN_CODE) {
 //             kit_carlson, lucky_duke, paul_regret, pedro_ramirez, rose_doolan, sid_ketchum,
 //             slab_the_killer, suzy_lafayette, vulture_sam, willy_the_kid
 // hand : liste de card_type, ou d'objets { type, suit, value } pour une carte précise
-const RIG = { 0: { character: 'lucky_duke', inPlay: ['dynamite'] } };
 
+const RIG = { 0: { character: 'kit_carlson' } };
 
 const CHARACTER_BASE_LIFE = { paul_regret: 3, el_gringo: 3 };
 const SUITS = ['hearts', 'diamonds', 'clubs', 'spades'];

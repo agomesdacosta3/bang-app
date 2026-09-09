@@ -675,3 +675,47 @@ entrypoint = "./functions/play-weapon/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/play-weapon/*.html" ]
+
+[functions.draw-jesse-steal]
+enabled = true
+verify_jwt = false
+import_map = "./functions/draw-jesse-steal/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/draw-jesse-steal/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/draw-jesse-steal/*.html" ]
+
+[functions.draw-pedro-discard]
+enabled = true
+verify_jwt = false
+import_map = "./functions/draw-pedro-discard/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/draw-pedro-discard/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/draw-pedro-discard/*.html" ]
+
+[functions.peek-kit-carlson]
+enabled = true
+verify_jwt = false
+import_map = "./functions/peek-kit-carlson/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/peek-kit-carlson/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/peek-kit-carlson/*.html" ]
+
+[functions.kit-carlson-choose]
+enabled = true
+verify_jwt = false
+import_map = "./functions/kit-carlson-choose/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/kit-carlson-choose/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/kit-carlson-choose/*.html" ]

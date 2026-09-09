@@ -13,7 +13,7 @@ type Player = SeatedPlayer & { is_sheriff: boolean; life_points: number; max_lif
 type HandCard = { id: string; card_type: string };
 type Equipment = { player_id: string; card_type: string };
 type StoreCard = { id: string; card_type: string; suit: string; value: number };
-type PendingTargetRow = { player_id: string; is_current_turn: boolean };
+type DiscardCard = { id: string; card_type: string; suit: string; value: number };
 type GameEvent = { id: string; event_type: string; actor_seat: number | null; amount: number | null; card_type: string | null };
 
 const CARD_LABELS: Record<string, string> = {
@@ -27,15 +27,20 @@ const EQUIPMENT_TAGS: Record<string, string> = {
   prison: '🔒', dynamite: '💣', barrel: '🛢️', mustang: '🐎', scope: '🔭',
   schofield: '🔫', remington: '🔫', carbine: '🔫', winchester: '🔫', volcanic: '🌋',
 };
-
 const ROLE_LABELS: Record<string, string> = { sheriff: 'Shérif', deputy: 'Adjoint', outlaw: 'Hors-la-loi', renegade: 'Renégat' };
+const SUIT_LABELS: Record<string, string> = { hearts: 'Cœur', diamonds: 'Carreau', clubs: 'Trèfle', spades: 'Pique' };
+const SUIT_SYMBOLS: Record<string, string> = { hearts: '♥', diamonds: '♦', clubs: '♣', spades: '♠' };
+const VALUE_LABELS: Record<number, string> = { 11: 'J', 12: 'Q', 13: 'K', 14: 'A' };
 const CHARACTER_LABELS: Record<string, string> = {
   bart_cassidy: 'Bart Cassidy', black_jack: 'Black Jack', calamity_janet: 'Calamity Janet', el_gringo: 'El Gringo',
   jesse_jones: 'Jesse Jones', jourdonnais: 'Jourdonnais', kit_carlson: 'Kit Carlson', lucky_duke: 'Lucky Duke',
   paul_regret: 'Paul Regret', pedro_ramirez: 'Pedro Ramirez', rose_doolan: 'Rose Doolan', sid_ketchum: 'Sid Ketchum',
   slab_the_killer: 'Slab le Flingueur', suzy_lafayette: 'Suzy Lafayette', vulture_sam: 'Sam le Vautour', willy_the_kid: 'Willy le Kid',
 };
-const SUIT_LABELS: Record<string, string> = { hearts: 'Cœur', diamonds: 'Carreau', clubs: 'Trèfle', spades: 'Pique' };
+
+function formatCardFace(suit: string, value: number) {
+  return `${VALUE_LABELS[value] ?? value}${SUIT_SYMBOLS[suit] ?? suit}`;
+}
 
 function describeOutcome(recentEvents: GameEvent[]): string {
   const latest = recentEvents[0];
@@ -47,7 +52,7 @@ function describeOutcome(recentEvents: GameEvent[]): string {
     case 'barrel_used': return `Siège ${latest.actor_seat} a esquivé avec la Planque !`;
     case 'indians_defended': return `Siège ${latest.actor_seat} a défendu avec Bang! contre Indiens!`;
     case 'store_card_taken': return `Siège ${latest.actor_seat} a récupéré : ${CARD_LABELS[latest.card_type ?? ''] ?? latest.card_type}`;
-    case 'card_discarded_forced': return `Siège ${latest.actor_seat} a défaussé : ${CARD_LABELS[latest.card_type ?? ''] ?? latest.card_type}`;
+    case 'card_discarded_forced': return `Siège ${latest.actor_seat} a défaussé : ${CARD_LABELS[latest.card_type ?? ''] ?? latest.card_type} (Coup de foudre)`;
     default: return 'Résolu.';
   }
 }
@@ -60,8 +65,9 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const [rolesMap, setRolesMap] = useState<Record<string, string>>({});
   const [charactersMap, setCharactersMap] = useState<Record<string, string>>({});
   const [myPendingRow, setMyPendingRow] = useState<{ is_current_turn: boolean; barrel_tried: boolean } | null>(null);
-  const [allPendingTargets, setAllPendingTargets] = useState<PendingTargetRow[]>([]);
+  const [allPendingTargets, setAllPendingTargets] = useState<{ player_id: string; is_current_turn: boolean }[]>([]);
   const [storeCards, setStoreCards] = useState<StoreCard[]>([]);
+  const [discardTop, setDiscardTop] = useState<DiscardCard[]>([]);
   const [handCounts, setHandCounts] = useState<Record<string, number>>({});
   const [targetPickerFor, setTargetPickerFor] = useState<string | null>(null);
   const [duelTargetPickerFor, setDuelTargetPickerFor] = useState<string | null>(null);
@@ -69,6 +75,9 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const [panicTargetPickerFor, setPanicTargetPickerFor] = useState<string | null>(null);
   const [catbalouTargetPickerFor, setCatbalouTargetPickerFor] = useState<string | null>(null);
   const [stealFlow, setStealFlow] = useState<{ targetId: string } | null>(null);
+  const [jesseTargetPicker, setJesseTargetPicker] = useState(false);
+  const [kitCarlsonCards, setKitCarlsonCards] = useState<{ type: string; suit: string; value: number }[] | null>(null);
+  const [kitCarlsonKeep, setKitCarlsonKeep] = useState<number[]>([]);
   const [discarding, setDiscarding] = useState(false);
   const [selectedDiscards, setSelectedDiscards] = useState<string[]>([]);
   const [actionLoading, setActionLoading] = useState(false);
@@ -79,7 +88,6 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const pendingWatchRef = useRef<string | null>(null);
 
   const me = players.find(p => p.id === playerId);
-  const amDead = me ? !me.is_alive : false;
   const isMyTurn = game?.current_player_id === playerId;
   const hasPending = !!game?.pending_type;
 
@@ -93,26 +101,21 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     const targetSeats = allPendingTargets.map(pt => seatOf(pt.player_id)).filter((s): s is number => s !== null);
 
     switch (game.pending_type) {
-      case 'bang_response':
-        return `Siège ${actorSeat} tire sur Siège ${targetSeats[0]} — en attente de sa réponse...`;
-      case 'gatling_response':
-        return `Siège ${actorSeat} a joué Gatling — en attente de ${targetSeats.length} réponse(s)`;
+      case 'bang_response': return `Siège ${actorSeat} tire sur Siège ${targetSeats[0]} — en attente de sa réponse...`;
+      case 'gatling_response': return `Siège ${actorSeat} a joué Gatling — en attente de ${targetSeats.length} réponse(s)`;
       case 'duel_response': {
         const current = allPendingTargets.find(pt => pt.is_current_turn);
         const currentSeat = seatOf(current?.player_id);
         return `Duel entre Siège ${actorSeat} et Siège ${targetSeats.find(s => s !== actorSeat)} — en attente de Siège ${currentSeat}`;
       }
-      case 'indians_response':
-        return `Siège ${actorSeat} a joué Indiens! — en attente de ${targetSeats.length} réponse(s)`;
-      case 'cat_balou_discard':
-        return `Siège ${actorSeat} a joué Coup de foudre sur Siège ${targetSeats[0]} — en attente de son choix`;
+      case 'indians_response': return `Siège ${actorSeat} a joué Indiens! — en attente de ${targetSeats.length} réponse(s)`;
+      case 'cat_balou_discard': return `Siège ${actorSeat} a joué Coup de foudre sur Siège ${targetSeats[0]} — en attente de son choix`;
       case 'general_store': {
         const current = allPendingTargets.find(pt => pt.is_current_turn);
         const currentSeat = seatOf(current?.player_id);
         return `Magasin en cours — au tour de Siège ${currentSeat} de choisir`;
       }
-      default:
-        return 'Une action est en cours...';
+      default: return 'Une action est en cours...';
     }
   }
 
@@ -124,6 +127,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     const { data: allPt } = await supabase.from('pending_targets').select('player_id, is_current_turn').eq('game_id', gameId);
     const { data: eq } = p?.length ? await supabase.from('cards_in_play').select('player_id, card_type').in('player_id', p.map(pl => pl.id)) : { data: [] };
     const { data: sc } = await supabase.from('general_store_cards').select('id, card_type, suit, value').eq('game_id', gameId);
+    const { data: dt } = await supabase.from('discard_pile').select('id, card_type, suit, value').eq('game_id', gameId).order('discarded_at', { ascending: false }).limit(3);
     const { data: hc } = p?.length ? await supabase.from('hand_counts').select('player_id, count').in('player_id', p.map(pl => pl.id)) : { data: [] };
 
     const eliminatedIds = (p ?? []).filter(pl => !pl.is_alive).map(pl => pl.id);
@@ -131,11 +135,13 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     const { data: roles } = await supabase.from('player_roles').select('player_id, role').in('player_id', idsForRoles);
     const map: Record<string, string> = {};
     (roles ?? []).forEach(r => { map[r.player_id] = r.role; });
-    const hcMap: Record<string, number> = {};
-    (hc ?? []).forEach(r => { hcMap[r.player_id] = r.count; });
+
     const { data: chars } = p?.length ? await supabase.from('player_characters').select('player_id, character').in('player_id', p.map(pl => pl.id)) : { data: [] };
     const charMap: Record<string, string> = {};
     (chars ?? []).forEach(c => { charMap[c.player_id] = c.character; });
+
+    const hcMap: Record<string, number> = {};
+    (hc ?? []).forEach(r => { hcMap[r.player_id] = r.count; });
 
     if (g) setGame(g);
     if (p) setPlayers(p);
@@ -144,6 +150,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     setAllPendingTargets(allPt ?? []);
     setEquipment(eq ?? []);
     setStoreCards(sc ?? []);
+    setDiscardTop(dt ?? []);
     setHandCounts(hcMap);
     setRolesMap(map);
     setCharactersMap(charMap);
@@ -161,11 +168,11 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cards_in_play' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'general_store_cards', filter: `game_id=eq.${gameId}` }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'player_characters' }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'discard_pile', filter: `game_id=eq.${gameId}` }, loadAll)
       .subscribe((status) => setChannelStatus(status));
     return () => { supabase.removeChannel(channel); };
   }, [gameId, playerId]);
 
-  // Filet de sécurité : resynchronise tout l'état même si un événement Realtime a été manqué
   useEffect(() => {
     const interval = setInterval(loadAll, 8000);
     return () => clearInterval(interval);
@@ -175,7 +182,6 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     firedTimeoutRef.current = false;
     if (!game?.pending_expires_at) { setSecondsLeft(null); return; }
     const expiresAt = new Date(game.pending_expires_at).getTime();
-
     const tick = () => {
       const remaining = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
       setSecondsLeft(remaining);
@@ -184,13 +190,11 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
         supabase.functions.invoke('resolve-timeout', { body: { gameId } }).catch(() => {});
       }
     };
-
     tick();
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, [game?.pending_expires_at, gameId]);
 
-  // Pop-up de résultat pour l'acteur qui a initié l'action en attente
   useEffect(() => {
     if (game?.pending_type && game.pending_initiator_id === playerId) {
       pendingWatchRef.current = game.pending_type;
@@ -199,9 +203,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
       if (game?.status !== 'finished') {
         (async () => {
           const { data: recent } = await supabase.from('game_events').select('*').eq('game_id', gameId).order('created_at', { ascending: false }).limit(2);
-          if (recent?.length) {
-            Alert.alert('Résultat', describeOutcome(recent as GameEvent[]));
-          }
+          if (recent?.length) Alert.alert('Résultat', describeOutcome(recent as GameEvent[]));
         })();
       }
     }
@@ -215,6 +217,44 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
 
   const handleDegainer = () => runAction(() => callFunction('resolve-start-of-turn', { gameId }));
   const handleDraw = () => runAction(() => callFunction('draw-cards', { gameId }));
+  const handleDrawJesseSteal = (targetPlayerId: string) => {
+    setJesseTargetPicker(false);
+    return runAction(() => callFunction('draw-jesse-steal', { gameId, targetPlayerId }));
+  };
+  const handleDrawPedroDiscard = () => runAction(() => callFunction('draw-pedro-discard', { gameId }));
+
+  async function handlePeekKitCarlson() {
+    if (actionLoading) return;
+    setActionLoading(true);
+    try {
+      const result = await callFunction('peek-kit-carlson', { gameId });
+      setKitCarlsonCards(result.cards);
+      setKitCarlsonKeep([]);
+    } catch (err: any) {
+      Alert.alert('Erreur', err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  }
+  function toggleKitCarlsonKeep(index: number) {
+    setKitCarlsonKeep(prev => {
+      if (prev.includes(index)) return prev.filter(i => i !== index);
+      if (prev.length >= 2) return prev;
+      return [...prev, index];
+    });
+  }
+  function handleConfirmKitCarlson() {
+    if (kitCarlsonKeep.length !== 2) {
+      Alert.alert('Choix incomplet', 'Sélectionnez exactement 2 cartes à garder.');
+      return;
+    }
+    return runAction(async () => {
+      await callFunction('kit-carlson-choose', { gameId, keepIndices: kitCarlsonKeep });
+      setKitCarlsonCards(null);
+      setKitCarlsonKeep([]);
+    });
+  }
+
   const handlePlayBeer = () => runAction(() => callFunction('play-beer', { gameId }));
   const handlePlayBang = (targetPlayerId: string) => {
     setTargetPickerFor(null);
@@ -266,49 +306,24 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     }
   }
 
-    function handleOpenPanicPicker(cardId: string) {
-    if (panicRangeTargets.length === 0) {
-      Alert.alert('Braquage!', 'Aucun joueur n’est à portée pour utiliser Braquage!');
-      return;
-    }
-    if (panicTargets.length === 0) {
-      Alert.alert('Braquage!', 'Aucun joueur à portée n’a de carte à voler.');
-      return;
-    }
-    setPanicTargetPickerFor(cardId);
-  }
-
-  function handleOpenCatBalouPicker(cardId: string) {
-    if (catBalouTargets.length === 0) {
-      Alert.alert('Coup de foudre', 'Aucun joueur n’a de carte à faire défausser.');
-      return;
-    }
-    setCatbalouTargetPickerFor(cardId);
-  }
-
   async function handleTryBarrel() {
     if (actionLoading) return;
     setActionLoading(true);
     try {
       const result = await callFunction('respond-bang', { gameId, action: 'try_barrel' });
-      if (result?.barrelWorked === false) {
-        Alert.alert('Planque ratée', `Carte tirée : ${SUIT_LABELS[result.drawnSuit] ?? result.drawnSuit}. Choisissez une autre réponse.`);
-      }
+      if (result?.barrelWorked === false) Alert.alert('Planque ratée', `Carte tirée : ${SUIT_LABELS[result.drawnSuit] ?? result.drawnSuit}. Choisissez une autre réponse.`);
     } catch (err: any) {
       Alert.alert('Erreur', err.message);
     } finally {
       setActionLoading(false);
     }
   }
-
   async function handleTryBarrelGatling() {
     if (actionLoading) return;
     setActionLoading(true);
     try {
       const result = await callFunction('respond-gatling', { gameId, action: 'try_barrel' });
-      if (result?.barrelWorked === false) {
-        Alert.alert('Planque ratée', `Carte tirée : ${SUIT_LABELS[result.drawnSuit] ?? result.drawnSuit}. Choisissez une autre réponse.`);
-      }
+      if (result?.barrelWorked === false) Alert.alert('Planque ratée', `Carte tirée : ${SUIT_LABELS[result.drawnSuit] ?? result.drawnSuit}. Choisissez une autre réponse.`);
     } catch (err: any) {
       Alert.alert('Erreur', err.message);
     } finally {
@@ -319,7 +334,15 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   function toggleDiscardSelection(cardId: string) {
     setSelectedDiscards(prev => prev.includes(cardId) ? prev.filter(id => id !== cardId) : [...prev, cardId]);
   }
-
+  function handleOpenPanicPicker(cardId: string) {
+    if (panicRangeTargets.length === 0) { Alert.alert('Braquage!', 'Aucun joueur n’est à portée pour utiliser Braquage!'); return; }
+    if (panicTargets.length === 0) { Alert.alert('Braquage!', 'Aucun joueur à portée n’a de carte à voler.'); return; }
+    setPanicTargetPickerFor(cardId);
+  }
+  function handleOpenCatBalouPicker(cardId: string) {
+    if (catBalouTargets.length === 0) { Alert.alert('Coup de foudre', 'Aucun joueur n’a de carte à faire défausser.'); return; }
+    setCatbalouTargetPickerFor(cardId);
+  }
   function handleConfirmEndTurn() {
     const excess = hand.length - (me?.life_points ?? 0);
     if (excess > 0 && selectedDiscards.length !== excess) {
@@ -346,7 +369,9 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     );
   }
 
+  const amDead = !me.is_alive;
   const myRole = me.is_sheriff ? 'sheriff' : rolesMap[playerId];
+  const myCharacter = charactersMap[playerId];
   const myEquipmentTypes = equipment.filter(e => e.player_id === playerId).map(e => e.card_type);
   const excess = hand.length - me.life_points;
   const aliveCount = players.filter(p => p.is_alive).length;
@@ -366,14 +391,15 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const myWeaponType = myEquipmentTypes.find(t => WEAPON_TYPES.includes(t));
   const myWeaponName = myWeaponType ? (CARD_LABELS[myWeaponType] ?? myWeaponType) : 'Colt .45';
   const hasVolcanic = myEquipmentTypes.includes('volcanic');
+
   const bangTargets = players.filter(p => p.is_alive && p.id !== playerId && computeDistance(players, playerId, p.id, equipmentFlags) <= myWeaponRange);
   const duelTargets = players.filter(p => p.is_alive && p.id !== playerId);
   const prisonTargets = players.filter(p => p.is_alive && p.id !== playerId && !p.is_sheriff && !equipment.some(e => e.player_id === p.id && e.card_type === 'prison'));
   const hasAnyCards = (id: string) => (handCounts[id] ?? 0) > 0 || equipment.some(e => e.player_id === id);
-  // Braquage! reste toujours à portée 1, contrairement à Bang! qui suit l'arme équipée
   const panicRangeTargets = players.filter(p => p.is_alive && p.id !== playerId && computeDistance(players, playerId, p.id, equipmentFlags) <= 1);
   const panicTargets = panicRangeTargets.filter(t => hasAnyCards(t.id));
   const catBalouTargets = duelTargets.filter(t => hasAnyCards(t.id));
+  const jesseTargets = players.filter(p => p.is_alive && p.id !== playerId && (handCounts[p.id] ?? 0) > 0);
 
   const needsDegainer = isMyTurn && !hasPending && game.turn_phase === 'draw' && myEquipmentTypes.some(t => t === 'dynamite' || t === 'prison');
   const canDraw = isMyTurn && !hasPending && game.turn_phase === 'draw' && !needsDegainer;
@@ -410,7 +436,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     <ScrollView style={styles.flexFill} contentContainerStyle={styles.container}>
       <Text style={styles.title}>Vie : {me.life_points}/{me.max_life_points}{me.is_sheriff ? ' 🎖️' : ''}</Text>
       <Text style={styles.subtitle}>Votre rôle : {ROLE_LABELS[myRole] ?? '...'}</Text>
-      <Text style={styles.subtitle}>Personnage : {CHARACTER_LABELS[charactersMap[playerId]] ?? '...'}</Text>
+      <Text style={styles.subtitle}>Personnage : {CHARACTER_LABELS[myCharacter] ?? '...'}</Text>
       <Text style={styles.hint}>Arme équipée : {myWeaponName} (portée {myWeaponRange})</Text>
       <Text style={styles.hint}>Dernière synchro : {lastSync || '—'}</Text>
       <Text style={styles.hint}>Canal : {channelStatus}</Text>
@@ -470,9 +496,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
           {isMyStoreTurn ? (
             <>
               <Text style={styles.pendingTitle}>Magasin — choisissez une carte : {timerLabel}</Text>
-              {storeCards.map(c => (
-                <Button key={c.id} title={CARD_LABELS[c.card_type] ?? c.card_type} onPress={() => handlePickStoreCard(c.id)} disabled={actionLoading} />
-              ))}
+              {storeCards.map(c => <Button key={c.id} title={CARD_LABELS[c.card_type] ?? c.card_type} onPress={() => handlePickStoreCard(c.id)} disabled={actionLoading} />)}
             </>
           ) : (
             <Text style={styles.pendingTitle}>{describePendingSituation()} {timerLabel}</Text>
@@ -528,9 +552,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
           <View>
             {hand.map(item => (
               <Pressable key={item.id} style={styles.cardRow} onPress={() => toggleDiscardSelection(item.id)}>
-                <Text style={styles.cardLabel}>
-                  {selectedDiscards.includes(item.id) ? '☑' : '☐'} {CARD_LABELS[item.card_type] ?? item.card_type}
-                </Text>
+                <Text style={styles.cardLabel}>{selectedDiscards.includes(item.id) ? '☑' : '☐'} {CARD_LABELS[item.card_type] ?? item.card_type}</Text>
               </Pressable>
             ))}
           </View>
@@ -541,7 +563,39 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
       )}
 
       {needsDegainer && <Button title="Dégainer" onPress={handleDegainer} disabled={actionLoading} />}
-      {canDraw && <Button title="Piocher" onPress={handleDraw} disabled={actionLoading} />}
+
+      {canDraw && myCharacter === 'jesse_jones' && (
+        <>
+          <Button title="Piocher normalement" onPress={handleDraw} disabled={actionLoading} />
+          <View style={styles.spacer} />
+          <Button title="Piocher dans la main d'un adversaire" onPress={() => setJesseTargetPicker(true)} disabled={actionLoading || jesseTargets.length === 0} />
+        </>
+      )}
+      {canDraw && myCharacter === 'pedro_ramirez' && (
+        <>
+          <Button title="Piocher normalement" onPress={handleDraw} disabled={actionLoading} />
+          <View style={styles.spacer} />
+          <Button title="Piocher depuis la défausse" onPress={handleDrawPedroDiscard} disabled={actionLoading || discardTop.length === 0} />
+        </>
+      )}
+      {canDraw && myCharacter === 'kit_carlson' && !kitCarlsonCards && (
+        <Button title="Regarder le dessus de la pioche" onPress={handlePeekKitCarlson} disabled={actionLoading} />
+      )}
+      {canDraw && !['jesse_jones', 'pedro_ramirez', 'kit_carlson'].includes(myCharacter) && (
+        <Button title="Piocher" onPress={handleDraw} disabled={actionLoading} />
+      )}
+
+      {kitCarlsonCards && (
+        <View style={styles.pendingBox}>
+          <Text style={styles.pendingTitle}>Choisissez 2 cartes à garder (la 3ᵉ retourne au-dessus de la pioche) :</Text>
+          {kitCarlsonCards.map((c, i) => (
+            <Pressable key={i} style={styles.cardRow} onPress={() => toggleKitCarlsonKeep(i)}>
+              <Text style={styles.cardLabel}>{kitCarlsonKeep.includes(i) ? '☑' : '☐'} {CARD_LABELS[c.type] ?? c.type} ({formatCardFace(c.suit, c.value)})</Text>
+            </Pressable>
+          ))}
+          <Button title="Confirmer" onPress={handleConfirmKitCarlson} disabled={actionLoading} />
+        </View>
+      )}
 
       {canAct && (
         <Button title={excess > 0 ? `Terminer le tour (défausser ${excess})` : 'Terminer le tour'} onPress={() => (excess > 0 ? setDiscarding(true) : handleConfirmEndTurn())} disabled={actionLoading} />
@@ -565,6 +619,17 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
           );
         })}
       </View>
+
+      <Text style={styles.sectionTitle}>Défausse (3 dernières)</Text>
+      {discardTop.length === 0 ? (
+        <Text style={styles.hint}>Vide</Text>
+      ) : (
+        <View>
+          {discardTop.map(c => (
+            <Text key={c.id} style={styles.playerRow}>{CARD_LABELS[c.card_type] ?? c.card_type} ({formatCardFace(c.suit, c.value)})</Text>
+          ))}
+        </View>
+      )}
 
       <Modal visible={!!targetPickerFor} transparent animationType="fade">
         <View style={styles.modalOverlay}>
@@ -616,9 +681,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
             <Text style={styles.subtitle}>Choisir une cible pour Coup de foudre :</Text>
-            {catBalouTargets.map(t => (
-              <Button key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayCatBalou(t.id)} />
-            ))}
+            {catBalouTargets.map(t => <Button key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayCatBalou(t.id)} />)}
             <View style={styles.spacer} />
             <Button title="Annuler" color="#999" onPress={() => setCatbalouTargetPickerFor(null)} />
           </View>
@@ -635,6 +698,17 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
             ))}
             <View style={styles.spacer} />
             <Button title="Annuler" color="#999" onPress={() => setStealFlow(null)} />
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={jesseTargetPicker} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <Text style={styles.subtitle}>Piocher dans la main de qui ?</Text>
+            {jesseTargets.map(t => <Button key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handleDrawJesseSteal(t.id)} />)}
+            <View style={styles.spacer} />
+            <Button title="Annuler" color="#999" onPress={() => setJesseTargetPicker(false)} />
           </View>
         </View>
       </Modal>

@@ -92,6 +92,9 @@ function formatEventConsole(e) {
       return e.drawn_suit_2
         ? `Siège ${e.actor_seat} dégaine (Lucky Duke) : ${formatCard(e.drawn_suit, e.drawn_value)} gardée, ${formatCard(e.drawn_suit_2, e.drawn_value_2)} écartée`
         : `Siège ${e.actor_seat} dégaine : ${formatCard(e.drawn_suit, e.drawn_value)}`;
+    case 'jesse_jones_steal': return `Siège ${e.actor_seat} pioche dans la main de Siège ${e.target_seat} (Jesse Jones)`;
+    case 'pedro_ramirez_discard_draw': return `Siège ${e.actor_seat} pioche depuis la défausse : ${CARD_LABELS_CONSOLE[e.card_type] ?? e.card_type} (Pedro Ramirez)`;
+    case 'kit_carlson_pick': return `Siège ${e.actor_seat} choisit 2 cartes parmi 3 (Kit Carlson)`;
     default: return e.event_type;
   }
 }
