@@ -3,8 +3,9 @@ import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
 import { applyDamage } from '../_shared/applyDamage.ts';
 import { degainer } from '../_shared/degainer.ts';
 import { logEvent } from '../_shared/events.ts';
+import { checkSuzyLafayette, getCharacter } from '../_shared/characters.ts';
+import { getMaxBarrelTries } from '../_shared/barrel.ts';
 import { corsHeaders } from '../_shared/cors.ts';
-import { checkSuzyLafayette } from '../_shared/characters.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -13,7 +14,7 @@ serve(async (req) => {
     const { data: { user } } = await supabaseAdmin.auth.getUser(token);
     if (!user) throw new Error('Non authentifié');
 
-    const { gameId, action } = await req.json();
+    const { gameId, action, cardType } = await req.json();
     const { data: game } = await supabaseAdmin.from('games').select('*').eq('id', gameId).single();
     if (!game || game.pending_type !== 'gatling_response') throw new Error('Aucun Gatling en attente');
 
@@ -22,25 +23,40 @@ serve(async (req) => {
     if (!myPending) throw new Error('Vous n’avez pas à répondre à ce Gatling');
 
     if (action === 'missed') {
-      const { data: missedCard } = await supabaseAdmin.from('hand_cards').select('id, suit, value').eq('player_id', me!.id).eq('card_type', 'missed').limit(1).single();
-      if (!missedCard) throw new Error('Vous n’avez pas de carte Raté!');
-      await supabaseAdmin.from('hand_cards').delete().eq('id', missedCard.id);
-      await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'missed', suit: missedCard.suit, value: missedCard.value });
+      const character = await getCharacter(me!.id);
+      const useBang = cardType === 'bang' && character === 'calamity_janet';
+      const searchType = useBang ? 'bang' : 'missed';
+      const { data: card } = await supabaseAdmin.from('hand_cards').select('id, suit, value').eq('player_id', me!.id).eq('card_type', searchType).limit(1).single();
+      if (!card) throw new Error(useBang ? 'Vous n’avez pas de carte Bang!' : 'Vous n’avez pas de carte Raté!');
+      await supabaseAdmin.from('hand_cards').delete().eq('id', card.id);
+      await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: searchType, suit: card.suit, value: card.value });
       await logEvent(gameId, 'missed_played', { actorSeat: me!.seat_position });
       await checkSuzyLafayette(gameId, me!.id);
     } else if (action === 'try_barrel') {
-      if (myPending.barrel_tried) throw new Error('Vous avez déjà essayé la Planque pour ce tir');
-      const { data: barrel } = await supabaseAdmin.from('cards_in_play').select('id').eq('player_id', me!.id).eq('card_type', 'barrel').maybeSingle();
-      if (!barrel) throw new Error('Vous n’avez pas de Planque en jeu');
-      await supabaseAdmin.from('pending_targets').update({ barrel_tried: true }).eq('id', myPending.id);
+      const maxTries = await getMaxBarrelTries(me!.id);
+      if (maxTries === 0) throw new Error('Vous n’avez pas de Planque en jeu');
+      if (myPending.barrel_tries_used >= maxTries) throw new Error('Vous avez déjà utilisé tous vos essais de Planque pour ce tir');
+      await supabaseAdmin.from('pending_targets').update({ barrel_tries_used: myPending.barrel_tries_used + 1 }).eq('id', myPending.id);
       const drawn = await degainer(gameId, me!.id, c => c.suit === 'hearts');
       if (drawn.suit !== 'hearts') {
         await logEvent(gameId, 'barrel_failed', { actorSeat: me!.seat_position });
         return new Response(JSON.stringify({ ok: true, barrelWorked: false, drawnSuit: drawn.suit }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
       await logEvent(gameId, 'barrel_used', { actorSeat: me!.seat_position });
+    } else if (action === 'drink_beer') {
+      const { data: allPlayers } = await supabaseAdmin.from('players').select('is_alive').eq('game_id', gameId);
+      const aliveCount = (allPlayers ?? []).filter(p => p.is_alive).length;
+      if (aliveCount <= 2) throw new Error('La Bière n’a aucun effet à 2 joueurs ou moins');
+      if (me!.life_points > 1) throw new Error('Cette option n’est possible que si le tir est mortel (dernier point de vie)');
+      const { data: beerCard } = await supabaseAdmin.from('hand_cards').select('id, suit, value').eq('player_id', me!.id).eq('card_type', 'beer').limit(1).single();
+      if (!beerCard) throw new Error('Vous n’avez pas de carte Bière');
+      await supabaseAdmin.from('hand_cards').delete().eq('id', beerCard.id);
+      await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'beer', suit: beerCard.suit, value: beerCard.value });
+      await supabaseAdmin.from('players').update({ life_points: 1 }).eq('id', me!.id);
+      await logEvent(gameId, 'beer_saved_from_death', { actorSeat: me!.seat_position });
+      await checkSuzyLafayette(gameId, me!.id);
     } else if (action === 'accept_damage') {
-      await applyDamage(gameId, me!.id);
+      await applyDamage(gameId, me!.id, 1, game.pending_initiator_id);
     } else {
       throw new Error('Action inconnue');
     }

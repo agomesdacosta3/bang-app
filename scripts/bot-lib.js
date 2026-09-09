@@ -96,6 +96,10 @@ function formatEventConsole(e) {
     case 'pedro_ramirez_discard_draw': return `Siège ${e.actor_seat} pioche depuis la défausse : ${CARD_LABELS_CONSOLE[e.card_type] ?? e.card_type} (Pedro Ramirez)`;
     case 'kit_carlson_pick': return `Siège ${e.actor_seat} choisit 2 cartes parmi 3 (Kit Carlson)`;
     case 'partial_cancel': return `Siège ${e.actor_seat} annule partiellement (${e.amount}/2) — Slab le Flingueur`;
+    case 'el_gringo_steal': return `Siège ${e.actor_seat} vole ${e.amount} carte(s) à Siège ${e.target_seat} (El Gringo)`;
+    case 'vulture_sam_loot': return `Siège ${e.actor_seat} récupère ${e.amount} carte(s) de Siège ${e.target_seat} (Sam le Vautour)`;
+    case 'sid_ketchum_heal': return `Siège ${e.actor_seat} défausse 2 cartes pour +1 PV (Sid Ketchum)`;
+    case 'beer_saved_from_death': return `Siège ${e.actor_seat} boit une Bière in extremis et reste à 1 PV`;
     default: return e.event_type;
   }
 }
@@ -184,7 +188,12 @@ async function passTurn(bot, gameId, bots, turnPhase) {
     const { type, targetSeat } = bot.forcedAction;
     delete bot.forcedAction;
     try {
-      if (type === 'duel') {
+      if (type === 'bang') {
+        const target = allPlayers.find(p => p.seat_position === targetSeat);
+        if (!target) throw new Error(`Aucun joueur au siège ${targetSeat}`);
+        console.log(`  → siège ${bot.seat} attaque le siège ${targetSeat} (forcé)`);
+        await call('play-bang', bot.token, { gameId, targetPlayerId: target.id });
+      } else if (type === 'duel') {
         const target = allPlayers.find(p => p.seat_position === targetSeat);
         if (!target) throw new Error(`Aucun joueur au siège ${targetSeat}`);
         console.log(`  → siège ${bot.seat} lance un Duel sur siège ${targetSeat} (forcé)`);

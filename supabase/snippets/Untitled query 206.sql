@@ -1,1 +1,1 @@
-insert into cards_in_play (player_id, card_type) values ('da9307d1-cac1-4e5d-9020-5b4034c9e071', 'mustang');
+select id, card_type from hand_cards where player_id = '9ad573b2-346c-44a4-b5aa-6376fbacdd0a' limit 100;

@@ -1,16 +1,10 @@
-// Crée une partie de test complète à partir d'un code, applique un scénario (rôle/personnage/main)
-// sur les sièges choisis, puis fait tourner la partie jusqu'à la fin.
+// Crée une partie de test complète à partir d'un code, applique un scénario (rôle/personnage/main/
+// équipement/vie/action forcée) sur les sièges choisis, puis fait tourner la partie jusqu'à la fin.
 // Usage : 1) crée une partie depuis le téléphone, note le code
 //         2) édite RIG ci-dessous
 //         3) node scripts/rig-game.js CODE
 //
-// Seule limite : le rôle du siège qui est Shérif ne peut pas être changé (voir explication dans la conversation) —
-// tout le reste (personnage sur n'importe quel siège y compris le tien et le Shérif, rôle sur n'importe quel
-// siège non-Shérif y compris le tien, main de n'importe quel siège) est librement modifiable.
-
-// hand : liste de card_type, ou d'objets { type, suit, value } pour une carte précise
-// inPlay : pareil, mais pose directement la carte "en jeu" (cards_in_play) plutôt qu'en main —
-//          utile pour placer Prison/Dynamite/Planque/Mustang/Lunette/armes déjà en place au démarrage
+// Seule limite : le rôle du siège qui est Shérif ne peut pas être changé.
 
 const { createClient } = require('@supabase/supabase-js');
 const { LOCAL_URL, ANON_KEY, SERVICE_ROLE_KEY, call, runGameLoop, printGameSummary } = require('./bot-lib');
@@ -21,21 +15,18 @@ if (!JOIN_CODE) {
   process.exit(1);
 }
 
-// Édite ici : seat_position -> { role?, character?, hand? }
-// role : 'deputy' | 'outlaw' | 'renegade' (sans effet si ce siège est le Shérif — voir limite ci-dessus)
-// character : bart_cassidy, black_jack, calamity_janet, el_gringo, jesse_jones, jourdonnais,
-//             kit_carlson, lucky_duke, paul_regret, pedro_ramirez, rose_doolan, sid_ketchum,
-//             slab_the_killer, suzy_lafayette, vulture_sam, willy_the_kid
+// Édite ici : seat_position -> { role?, character?, hand?, inPlay?, life?, forcedAction? }
+// role : 'deputy' | 'outlaw' | 'renegade' (sans effet si ce siège est le Shérif)
+// character : n'importe lequel des 16
 // hand : liste de card_type, ou d'objets { type, suit, value } pour une carte précise
-// forcedAction : { type: 'duel' | 'indians', targetSeat? } — force ce bot à jouer cette carte
+// inPlay : pareil, mais pose directement la carte "en jeu" plutôt qu'en main
+// life : force life_points ET max_life_points à cette valeur exacte, après tout ajustement de personnage —
+//        utile pour provoquer une élimination rapidement en test
+// forcedAction : { type: 'bang' | 'duel' | 'indians', targetSeat? } — force ce bot à jouer cette carte
 //                une seule fois, à son prochain tour, avant de reprendre un comportement normal
-//                (targetSeat requis pour 'duel', ignoré pour 'indians')
+//                (targetSeat requis pour 'bang'/'duel', ignoré pour 'indians')
 
-const RIG = {
-  0: { character: 'calamity_janet', hand: ['missed'] },
-  1: { hand: ['indians'], forcedAction: { type: 'indians' } },
-};
-
+const RIG = { 0: {}, 1: { character: 'sid_ketchum', hand: ['bang', 'bang', 'bang', 'bang'] } };
 
 const CHARACTER_BASE_LIFE = { paul_regret: 3, el_gringo: 3 };
 const SUITS = ['hearts', 'diamonds', 'clubs', 'spades'];
@@ -83,6 +74,11 @@ async function run() {
       const newLife = base + (player.is_sheriff ? 1 : 0);
       await admin.from('players').update({ life_points: newLife, max_life_points: newLife }).eq('id', player.id);
       console.log(`Siège ${seat} → personnage forcé : ${rig.character} (vie ajustée à ${newLife}${player.is_sheriff ? ', dont +1 Shérif' : ''})`);
+    }
+
+    if (rig.life !== undefined) {
+      await admin.from('players').update({ life_points: rig.life, max_life_points: rig.life }).eq('id', player.id);
+      console.log(`Siège ${seat} → vie forcée : ${rig.life}/${rig.life}`);
     }
 
     if (rig.hand) {

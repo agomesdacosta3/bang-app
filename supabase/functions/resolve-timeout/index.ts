@@ -5,7 +5,6 @@ import { clearPending } from '../_shared/pending.ts';
 import { pickGeneralStoreCard } from '../_shared/generalStore.ts';
 import { logEvent } from '../_shared/events.ts';
 import { corsHeaders } from '../_shared/cors.ts';
-import { checkSuzyLafayette } from '../_shared/characters.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -37,13 +36,17 @@ serve(async (req) => {
         }
         await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: pick.card_type, suit: pick.suit, value: pick.value });
         await logEvent(gameId, 'card_discarded_forced', { actorSeat: targetPlayer!.seat_position, cardType: pick.card_type });
-        if (pick.kind === 'hand') await checkSuzyLafayette(gameId, targetRow!.player_id);
       }
       await clearPending(gameId);
     } else {
       const { data: toResolve } = await supabaseAdmin.from('pending_targets').select('player_id').eq('game_id', gameId).eq('is_current_turn', true);
       for (const row of toResolve ?? []) {
-        await applyDamage(gameId, row.player_id);
+        let causedBy: string | undefined = game.pending_initiator_id ?? undefined;
+        if (game.pending_type === 'duel_response') {
+          const { data: opponent } = await supabaseAdmin.from('pending_targets').select('player_id').eq('game_id', gameId).neq('player_id', row.player_id).maybeSingle();
+          causedBy = opponent?.player_id ?? causedBy;
+        }
+        await applyDamage(gameId, row.player_id, 1, causedBy);
       }
       await clearPending(gameId);
     }

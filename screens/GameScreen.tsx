@@ -15,7 +15,7 @@ type Equipment = { player_id: string; card_type: string };
 type StoreCard = { id: string; card_type: string; suit: string; value: number };
 type DiscardCard = { id: string; card_type: string; suit: string; value: number };
 type PendingRow = { is_current_turn: boolean; barrel_tries_used: number; cancels_needed: number; cancels_achieved: number };
-type GameEvent = { id: string; event_type: string; actor_seat: number | null; amount: number | null; card_type: string | null };
+type GameEvent = { id: string; event_type: string; actor_seat: number | null; target_seat: number | null; amount: number | null; card_type: string | null };
 
 const CARD_LABELS: Record<string, string> = {
   bang: 'Bang!', missed: 'Raté!', beer: 'Bière', duel: 'Duel', indians: 'Indiens!',
@@ -54,6 +54,9 @@ function describeOutcome(recentEvents: GameEvent[]): string {
     case 'indians_defended': return `Siège ${latest.actor_seat} a défendu avec Bang! contre Indiens!`;
     case 'store_card_taken': return `Siège ${latest.actor_seat} a récupéré : ${CARD_LABELS[latest.card_type ?? ''] ?? latest.card_type}`;
     case 'card_discarded_forced': return `Siège ${latest.actor_seat} a défaussé : ${CARD_LABELS[latest.card_type ?? ''] ?? latest.card_type} (Coup de foudre)`;
+    case 'beer_saved_from_death': return `Siège ${latest.actor_seat} a bu une Bière in extremis et reste à 1 PV !`;
+    case 'el_gringo_steal': return `Siège ${latest.actor_seat} vole une carte à Siège ${latest.target_seat} (El Gringo)`;
+    case 'vulture_sam_loot': return `Siège ${latest.actor_seat} récupère ${latest.amount} carte(s) de Siège ${latest.target_seat} (Sam le Vautour)`;
     default: return 'Résolu.';
   }
 }
@@ -82,6 +85,8 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const [kitCarlsonKeep, setKitCarlsonKeep] = useState<number[]>([]);
   const [discarding, setDiscarding] = useState(false);
   const [selectedDiscards, setSelectedDiscards] = useState<string[]>([]);
+  const [sidKetchumMode, setSidKetchumMode] = useState(false);
+  const [selectedSidCards, setSelectedSidCards] = useState<string[]>([]);
   const [actionLoading, setActionLoading] = useState(false);
   const [lastSync, setLastSync] = useState('');
   const [channelStatus, setChannelStatus] = useState('(pas encore connecté)');
@@ -278,10 +283,10 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const handlePlayGatling = () => runAction(() => callFunction('play-gatling', { gameId }));
   const handlePlayGeneralStore = () => runAction(() => callFunction('play-general-store', { gameId }));
   const handlePlayWeapon = (cardType: string) => runAction(() => callFunction('play-weapon', { gameId, cardType }));
-  const handleRespond = (action: 'missed' | 'accept_damage', cardType?: string) => runAction(() => callFunction('respond-bang', { gameId, action, cardType }));
-  const handleRespondGatling = (action: 'missed' | 'accept_damage', cardType?: string) => runAction(() => callFunction('respond-gatling', { gameId, action, cardType }));
-  const handleRespondDuel = (action: 'discard_bang' | 'accept_damage', cardType?: string) => runAction(() => callFunction('respond-duel', { gameId, action, cardType }));
-  const handleRespondIndians = (action: 'discard_bang' | 'accept_damage', cardType?: string) => runAction(() => callFunction('respond-indians', { gameId, action, cardType }));
+  const handleRespond = (action: 'missed' | 'accept_damage' | 'drink_beer', cardType?: string) => runAction(() => callFunction('respond-bang', { gameId, action, cardType }));
+  const handleRespondGatling = (action: 'missed' | 'accept_damage' | 'drink_beer', cardType?: string) => runAction(() => callFunction('respond-gatling', { gameId, action, cardType }));
+  const handleRespondDuel = (action: 'discard_bang' | 'accept_damage' | 'drink_beer', cardType?: string) => runAction(() => callFunction('respond-duel', { gameId, action, cardType }));
+  const handleRespondIndians = (action: 'discard_bang' | 'accept_damage' | 'drink_beer', cardType?: string) => runAction(() => callFunction('respond-indians', { gameId, action, cardType }));
   const handlePickStoreCard = (cardId: string) => runAction(() => callFunction('pick-general-store-card', { gameId, cardId }));
   const handleRespondCatBalouHand = (handCardId: string) => runAction(() => callFunction('respond-catbalou', { gameId, handCardId }));
   const handleRespondCatBalouEquip = (inPlayCardType: string) => runAction(() => callFunction('respond-catbalou', { gameId, inPlayCardType }));
@@ -352,6 +357,22 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     });
   }
 
+  function toggleSidSelection(cardId: string) {
+    setSelectedSidCards(prev => {
+      if (prev.includes(cardId)) return prev.filter(id => id !== cardId);
+      if (prev.length >= 2) return prev;
+      return [...prev, cardId];
+    });
+  }
+  function handleConfirmSidHeal() {
+    if (selectedSidCards.length !== 2) { Alert.alert('Choix incomplet', 'Sélectionnez exactement 2 cartes.'); return; }
+    return runAction(async () => {
+      await callFunction('play-sid-ketchum-heal', { gameId, cardIds: selectedSidCards });
+      setSidKetchumMode(false);
+      setSelectedSidCards([]);
+    });
+  }
+
   if (!game || !me) return <View style={styles.centerContainer}><Text>Chargement...</Text></View>;
 
   if (game.status === 'finished') {
@@ -376,6 +397,8 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const aliveCount = players.filter(p => p.is_alive).length;
   const hasMissed = hand.some(c => c.card_type === 'missed');
   const hasBang = hand.some(c => c.card_type === 'bang');
+  const hasBeer = hand.some(c => c.card_type === 'beer');
+  const canDrinkBeerToSurvive = hasBeer && me.life_points <= 1 && aliveCount > 2;
   const hasBarrelInPlay = myEquipmentTypes.includes('barrel');
   const maxBarrelTries = (isJourdonnais ? 1 : 0) + (hasBarrelInPlay ? 1 : 0);
   const canTryBarrel = maxBarrelTries > 0 && (myPendingRow?.barrel_tries_used ?? 0) < maxBarrelTries;
@@ -450,6 +473,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
           {hasMissed && <Button title="Jouer Raté!" onPress={() => handleRespond('missed')} disabled={actionLoading} />}
           {isCalamityJanet && hasBang && <Button title="Jouer Bang! comme Raté!" onPress={() => handleRespond('missed', 'bang')} disabled={actionLoading} />}
           {canTryBarrel && <Button title="Essayer la Planque" onPress={handleTryBarrel} disabled={actionLoading} />}
+          {canDrinkBeerToSurvive && <Button title="Boire une Bière (survivre)" onPress={() => handleRespond('drink_beer')} disabled={actionLoading} />}
           <View style={styles.spacer} />
           <Button title="Encaisser les dégâts" color="#a33" onPress={() => handleRespond('accept_damage')} disabled={actionLoading} />
         </View>
@@ -461,6 +485,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
           {hasMissed && <Button title="Jouer Raté!" onPress={() => handleRespondGatling('missed')} disabled={actionLoading} />}
           {isCalamityJanet && hasBang && <Button title="Jouer Bang! comme Raté!" onPress={() => handleRespondGatling('missed', 'bang')} disabled={actionLoading} />}
           {canTryBarrel && <Button title="Essayer la Planque" onPress={handleTryBarrelGatling} disabled={actionLoading} />}
+          {canDrinkBeerToSurvive && <Button title="Boire une Bière (survivre)" onPress={() => handleRespondGatling('drink_beer')} disabled={actionLoading} />}
           <View style={styles.spacer} />
           <Button title="Encaisser les dégâts" color="#a33" onPress={() => handleRespondGatling('accept_damage')} disabled={actionLoading} />
         </View>
@@ -471,6 +496,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
           <Text style={styles.pendingTitle}>Duel ! Continuez ou encaissez : {timerLabel}</Text>
           {hasBang && <Button title="Jouer Bang!" onPress={() => handleRespondDuel('discard_bang')} disabled={actionLoading} />}
           {isCalamityJanet && hasMissed && <Button title="Jouer Raté! comme Bang!" onPress={() => handleRespondDuel('discard_bang', 'missed')} disabled={actionLoading} />}
+          {canDrinkBeerToSurvive && <Button title="Boire une Bière (survivre)" onPress={() => handleRespondDuel('drink_beer')} disabled={actionLoading} />}
           <View style={styles.spacer} />
           <Button title="Encaisser les dégâts" color="#a33" onPress={() => handleRespondDuel('accept_damage')} disabled={actionLoading} />
         </View>
@@ -481,6 +507,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
           <Text style={styles.pendingTitle}>Indiens! Défendez-vous ou encaissez : {timerLabel}</Text>
           {hasBang && <Button title="Jouer Bang!" onPress={() => handleRespondIndians('discard_bang')} disabled={actionLoading} />}
           {isCalamityJanet && hasMissed && <Button title="Jouer Raté! comme Bang!" onPress={() => handleRespondIndians('discard_bang', 'missed')} disabled={actionLoading} />}
+          {canDrinkBeerToSurvive && <Button title="Boire une Bière (survivre)" onPress={() => handleRespondIndians('drink_beer')} disabled={actionLoading} />}
           <View style={styles.spacer} />
           <Button title="Encaisser les dégâts" color="#a33" onPress={() => handleRespondIndians('accept_damage')} disabled={actionLoading} />
         </View>
@@ -521,7 +548,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
       )}
 
       <Text style={styles.sectionTitle}>Votre main</Text>
-      {!discarding && (
+      {!discarding && !sidKetchumMode && (
         <View>
           {hand.length === 0 && <Text style={styles.hint}>Main vide</Text>}
           {hand.map(item => (
@@ -566,6 +593,22 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
         </>
       )}
 
+      {sidKetchumMode && (
+        <>
+          <Text style={styles.subtitle}>Choisis 2 cartes à défausser pour regagner 1 PV :</Text>
+          <View>
+            {hand.map(item => (
+              <Pressable key={item.id} style={styles.cardRow} onPress={() => toggleSidSelection(item.id)}>
+                <Text style={styles.cardLabel}>{selectedSidCards.includes(item.id) ? '☑' : '☐'} {CARD_LABELS[item.card_type] ?? item.card_type}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Button title="Confirmer" onPress={handleConfirmSidHeal} disabled={actionLoading} />
+          <View style={styles.spacer} />
+          <Button title="Annuler" color="#999" onPress={() => { setSidKetchumMode(false); setSelectedSidCards([]); }} disabled={actionLoading} />
+        </>
+      )}
+
       {needsDegainer && <Button title="Dégainer" onPress={handleDegainer} disabled={actionLoading} />}
 
       {canDraw && myCharacter === 'jesse_jones' && (
@@ -599,6 +642,10 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
           ))}
           <Button title="Confirmer" onPress={handleConfirmKitCarlson} disabled={actionLoading} />
         </View>
+      )}
+
+      {myCharacter === 'sid_ketchum' && !amDead && me.life_points < me.max_life_points && hand.length >= 2 && !sidKetchumMode && !discarding && (
+        <Button title="Défausser 2 cartes pour +1 PV (Sid Ketchum)" onPress={() => setSidKetchumMode(true)} disabled={actionLoading} />
       )}
 
       {canAct && (
