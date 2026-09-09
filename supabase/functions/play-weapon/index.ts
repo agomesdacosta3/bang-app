@@ -2,6 +2,8 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
 import { WEAPON_TYPES } from '../_shared/weapons.ts';
 import { corsHeaders } from '../_shared/cors.ts';
+import { logEvent } from '../_shared/events.ts';
+import { checkSuzyLafayette } from '../_shared/characters.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -33,6 +35,8 @@ serve(async (req) => {
 
     await supabaseAdmin.from('hand_cards').delete().eq('id', weaponCard.id);
     await supabaseAdmin.from('cards_in_play').insert({ player_id: me.id, card_type: cardType, suit: weaponCard.suit, value: weaponCard.value });
+    await logEvent(gameId, 'weapon_equipped', { actorSeat: me.seat_position, cardType });
+    await checkSuzyLafayette(gameId, me.id);
 
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {

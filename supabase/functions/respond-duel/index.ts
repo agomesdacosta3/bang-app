@@ -3,6 +3,8 @@ import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
 import { applyDamage } from '../_shared/applyDamage.ts';
 import { clearPending } from '../_shared/pending.ts';
 import { corsHeaders } from '../_shared/cors.ts';
+import { logEvent } from '../_shared/events.ts';
+import { checkSuzyLafayette } from '../_shared/characters.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -29,6 +31,8 @@ serve(async (req) => {
       await supabaseAdmin.from('pending_targets').update({ is_current_turn: false }).eq('id', myPending.id);
       await supabaseAdmin.from('pending_targets').update({ is_current_turn: true }).eq('id', opponent!.id);
       await supabaseAdmin.from('games').update({ pending_expires_at: new Date(Date.now() + 20_000).toISOString() }).eq('id', gameId);
+      await logEvent(gameId, 'duel_bang_discarded', { actorSeat: me!.seat_position });
+      await checkSuzyLafayette(gameId, me!.id);
     } else if (action === 'accept_damage') {
       await applyDamage(gameId, me!.id);
       await clearPending(gameId);

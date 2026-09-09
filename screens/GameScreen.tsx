@@ -27,7 +27,14 @@ const EQUIPMENT_TAGS: Record<string, string> = {
   prison: '🔒', dynamite: '💣', barrel: '🛢️', mustang: '🐎', scope: '🔭',
   schofield: '🔫', remington: '🔫', carbine: '🔫', winchester: '🔫', volcanic: '🌋',
 };
+
 const ROLE_LABELS: Record<string, string> = { sheriff: 'Shérif', deputy: 'Adjoint', outlaw: 'Hors-la-loi', renegade: 'Renégat' };
+const CHARACTER_LABELS: Record<string, string> = {
+  bart_cassidy: 'Bart Cassidy', black_jack: 'Black Jack', calamity_janet: 'Calamity Janet', el_gringo: 'El Gringo',
+  jesse_jones: 'Jesse Jones', jourdonnais: 'Jourdonnais', kit_carlson: 'Kit Carlson', lucky_duke: 'Lucky Duke',
+  paul_regret: 'Paul Regret', pedro_ramirez: 'Pedro Ramirez', rose_doolan: 'Rose Doolan', sid_ketchum: 'Sid Ketchum',
+  slab_the_killer: 'Slab le Flingueur', suzy_lafayette: 'Suzy Lafayette', vulture_sam: 'Sam le Vautour', willy_the_kid: 'Willy le Kid',
+};
 const SUIT_LABELS: Record<string, string> = { hearts: 'Cœur', diamonds: 'Carreau', clubs: 'Trèfle', spades: 'Pique' };
 
 function describeOutcome(recentEvents: GameEvent[]): string {
@@ -38,6 +45,7 @@ function describeOutcome(recentEvents: GameEvent[]): string {
     case 'damage_taken': return `Siège ${latest.actor_seat} a encaissé ${latest.amount ?? 1} point(s) de vie`;
     case 'missed_played': return `Siège ${latest.actor_seat} a esquivé avec Raté!`;
     case 'barrel_used': return `Siège ${latest.actor_seat} a esquivé avec la Planque !`;
+    case 'indians_defended': return `Siège ${latest.actor_seat} a défendu avec Bang! contre Indiens!`;
     case 'store_card_taken': return `Siège ${latest.actor_seat} a récupéré : ${CARD_LABELS[latest.card_type ?? ''] ?? latest.card_type}`;
     case 'card_discarded_forced': return `Siège ${latest.actor_seat} a défaussé : ${CARD_LABELS[latest.card_type ?? ''] ?? latest.card_type}`;
     default: return 'Résolu.';
@@ -50,6 +58,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const [hand, setHand] = useState<HandCard[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [rolesMap, setRolesMap] = useState<Record<string, string>>({});
+  const [charactersMap, setCharactersMap] = useState<Record<string, string>>({});
   const [myPendingRow, setMyPendingRow] = useState<{ is_current_turn: boolean; barrel_tried: boolean } | null>(null);
   const [allPendingTargets, setAllPendingTargets] = useState<PendingTargetRow[]>([]);
   const [storeCards, setStoreCards] = useState<StoreCard[]>([]);
@@ -124,6 +133,9 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     (roles ?? []).forEach(r => { map[r.player_id] = r.role; });
     const hcMap: Record<string, number> = {};
     (hc ?? []).forEach(r => { hcMap[r.player_id] = r.count; });
+    const { data: chars } = p?.length ? await supabase.from('player_characters').select('player_id, character').in('player_id', p.map(pl => pl.id)) : { data: [] };
+    const charMap: Record<string, string> = {};
+    (chars ?? []).forEach(c => { charMap[c.player_id] = c.character; });
 
     if (g) setGame(g);
     if (p) setPlayers(p);
@@ -134,6 +146,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     setStoreCards(sc ?? []);
     setHandCounts(hcMap);
     setRolesMap(map);
+    setCharactersMap(charMap);
     setLastSync(new Date().toLocaleTimeString());
   }
 
@@ -147,6 +160,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
       .on('postgres_changes', { event: '*', schema: 'public', table: 'pending_targets', filter: `game_id=eq.${gameId}` }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'cards_in_play' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'general_store_cards', filter: `game_id=eq.${gameId}` }, loadAll)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'player_characters' }, loadAll)
       .subscribe((status) => setChannelStatus(status));
     return () => { supabase.removeChannel(channel); };
   }, [gameId, playerId]);
@@ -343,6 +357,10 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
 
   const mustangIds = new Set(equipment.filter(e => e.card_type === 'mustang').map(e => e.player_id));
   const scopeIds = new Set(equipment.filter(e => e.card_type === 'scope').map(e => e.player_id));
+  players.forEach(p => {
+    if (charactersMap[p.id] === 'paul_regret') mustangIds.add(p.id);
+    if (charactersMap[p.id] === 'rose_doolan') scopeIds.add(p.id);
+  });
   const equipmentFlags = { mustangIds, scopeIds };
   const myWeaponRange = getWeaponRange(myEquipmentTypes);
   const myWeaponType = myEquipmentTypes.find(t => WEAPON_TYPES.includes(t));
@@ -392,6 +410,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     <ScrollView style={styles.flexFill} contentContainerStyle={styles.container}>
       <Text style={styles.title}>Vie : {me.life_points}/{me.max_life_points}{me.is_sheriff ? ' 🎖️' : ''}</Text>
       <Text style={styles.subtitle}>Votre rôle : {ROLE_LABELS[myRole] ?? '...'}</Text>
+      <Text style={styles.subtitle}>Personnage : {CHARACTER_LABELS[charactersMap[playerId]] ?? '...'}</Text>
       <Text style={styles.hint}>Arme équipée : {myWeaponName} (portée {myWeaponRange})</Text>
       <Text style={styles.hint}>Dernière synchro : {lastSync || '—'}</Text>
       <Text style={styles.hint}>Canal : {channelStatus}</Text>
@@ -534,13 +553,14 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
           const tags = equipment.filter(e => e.player_id === item.id).map(e => EQUIPMENT_TAGS[e.card_type]).join(' ');
           const role = item.is_sheriff ? 'sheriff' : rolesMap[item.id];
           const roleLabel = !item.is_alive && role ? ` — ${ROLE_LABELS[role] ?? role}` : '';
-          const isOther = item.id !== playerId && item.is_alive;
+          const characterLabel = CHARACTER_LABELS[charactersMap[item.id]] ?? '';
+          const isOther = item.id !== playerId && item.is_alive && !amDead;
           const distTo = isOther ? computeDistance(players, playerId, item.id, equipmentFlags) : null;
           const distFrom = isOther ? computeDistance(players, item.id, playerId, equipmentFlags) : null;
           const distanceLabel = isOther ? ` · vous→lui: ${distTo} · lui→vous: ${distFrom}` : '';
           return (
             <Text key={item.id} style={styles.playerRow}>
-              Siège {item.seat_position}{item.is_sheriff ? ' 🎖️' : ''} — {item.is_alive ? `${item.life_points} PV` : 'éliminé' + roleLabel}{item.id === playerId ? ' (vous)' : ''} {tags}{distanceLabel}
+              Siège {item.seat_position} ({characterLabel}){item.is_sheriff ? ' 🎖️' : ''} — {item.is_alive ? `${item.life_points} PV` : 'éliminé' + roleLabel}{item.id === playerId ? ' (vous)' : ''} {tags}{distanceLabel}
             </Text>
           );
         })}

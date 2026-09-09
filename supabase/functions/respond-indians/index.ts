@@ -1,7 +1,9 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
 import { applyDamage } from '../_shared/applyDamage.ts';
+import { logEvent } from '../_shared/events.ts';
 import { corsHeaders } from '../_shared/cors.ts';
+import { checkSuzyLafayette } from '../_shared/characters.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -23,6 +25,8 @@ serve(async (req) => {
       if (!bangCard) throw new Error('Vous n’avez pas de carte Bang!');
       await supabaseAdmin.from('hand_cards').delete().eq('id', bangCard.id);
       await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'bang', suit: bangCard.suit, value: bangCard.value });
+      await logEvent(gameId, 'indians_defended', { actorSeat: me!.seat_position });
+      await checkSuzyLafayette(gameId, me!.id);
     } else if (action === 'accept_damage') {
       await applyDamage(gameId, me!.id);
     } else {

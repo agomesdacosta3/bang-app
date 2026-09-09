@@ -4,6 +4,7 @@ import { corsHeaders } from '../_shared/cors.ts';
 import { degainer } from '../_shared/degainer.ts';
 import { applyDamage } from '../_shared/applyDamage.ts';
 import { advanceTurn } from '../_shared/turn.ts';
+import { logEvent } from '../_shared/events.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -25,7 +26,7 @@ serve(async (req) => {
     if (!dynamiteRow && !prisonRow) throw new Error('Rien à dégainer');
 
     if (dynamiteRow) {
-      const drawn = await degainer(gameId);
+      const drawn = await degainer(gameId, me.id, c => !(c.suit === 'spades' && c.value >= 2 && c.value <= 9));
       await supabaseAdmin.from('cards_in_play').delete().eq('id', dynamiteRow.id);
       const explodes = drawn.suit === 'spades' && drawn.value >= 2 && drawn.value <= 9;
 
@@ -43,17 +44,20 @@ serve(async (req) => {
         const myIndex = alive.findIndex(p => p.id === me.id);
         const leftNeighbor = alive[(myIndex + 1) % alive.length];
         await supabaseAdmin.from('cards_in_play').insert({ player_id: leftNeighbor.id, card_type: 'dynamite', suit: dynamiteRow.suit, value: dynamiteRow.value });
+        await logEvent(gameId, 'dynamite_passed', { actorSeat: leftNeighbor.seat_position });
       }
     }
 
     if (prisonRow) {
-      const drawn = await degainer(gameId);
+      const drawn = await degainer(gameId, me.id, c => c.suit === 'hearts');
       await supabaseAdmin.from('cards_in_play').delete().eq('id', prisonRow.id);
       await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'prison', suit: prisonRow.suit, value: prisonRow.value });
       if (drawn.suit !== 'hearts') {
+        await logEvent(gameId, 'prison_failed', { actorSeat: me.seat_position });
         const next = await advanceTurn(gameId, me.id);
         return new Response(JSON.stringify({ ok: true, skippedTurn: true, turnEnded: true, nextPlayerId: next.id }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
+      await logEvent(gameId, 'prison_escaped', { actorSeat: me.seat_position });
     }
 
     return new Response(JSON.stringify({ ok: true, turnEnded: false }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

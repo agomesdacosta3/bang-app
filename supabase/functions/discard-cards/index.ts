@@ -2,6 +2,7 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { advanceTurn } from '../_shared/turn.ts';
+import { checkSuzyLafayette } from '../_shared/characters.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -29,6 +30,7 @@ serve(async (req) => {
       await supabaseAdmin.from('discard_pile').insert(discardedCards!.map(c => ({ game_id: gameId, card_type: c.card_type, suit: c.suit, value: c.value })));
     }
 
+    await checkSuzyLafayette(gameId, me.id);
     const next = await advanceTurn(gameId, me.id);
     return new Response(JSON.stringify({ ok: true, nextPlayerId: next.id }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {

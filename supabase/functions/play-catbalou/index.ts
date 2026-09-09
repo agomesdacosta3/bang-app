@@ -2,6 +2,8 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
 import { startPending } from '../_shared/pending.ts';
 import { corsHeaders } from '../_shared/cors.ts';
+import { logEvent } from '../_shared/events.ts';
+import { checkSuzyLafayette } from '../_shared/characters.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -35,7 +37,9 @@ serve(async (req) => {
 
     // Le choix (main ou en jeu, et laquelle) appartient entièrement à la cible
     await startPending(gameId, me.id, 'cat_balou_discard', [{ playerId: target.id, isCurrentTurn: true }]);
-
+    await logEvent(gameId, 'catbalou_played', { actorSeat: me.seat_position, targetSeat: target.seat_position });
+    await checkSuzyLafayette(gameId, me.id);
+    
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {
     return new Response(JSON.stringify({ error: err.message }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

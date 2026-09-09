@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
 import { clearPending } from '../_shared/pending.ts';
 import { logEvent } from '../_shared/events.ts';
 import { corsHeaders } from '../_shared/cors.ts';
+import { checkSuzyLafayette } from '../_shared/characters.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -37,6 +38,7 @@ serve(async (req) => {
     }
 
     await logEvent(gameId, 'card_discarded_forced', { actorSeat: me!.seat_position, cardType: discardedType });
+    if (handCardId) await checkSuzyLafayette(gameId, me!.id);
     await clearPending(gameId);
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {

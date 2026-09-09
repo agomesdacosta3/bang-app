@@ -5,6 +5,8 @@ import { getWeaponRange } from '../_shared/weapons.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { startPending } from '../_shared/pending.ts';
 import { logEvent } from '../_shared/events.ts';
+import { buildDistanceFlags } from '../_shared/distanceFlags.ts';
+import { checkSuzyLafayette } from '../_shared/characters.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -32,8 +34,7 @@ serve(async (req) => {
     const target = players!.find(p => p.id === targetPlayerId);
     if (!target?.is_alive) throw new Error('Cible invalide');
 
-    const mustangIds = new Set((allEquipment ?? []).filter(e => e.card_type === 'mustang').map(e => e.player_id));
-    const scopeIds = new Set((allEquipment ?? []).filter(e => e.card_type === 'scope').map(e => e.player_id));
+    const { mustangIds, scopeIds } = await buildDistanceFlags(players!.map(p => p.id));
     const distance = computeDistance(players!, me.id, target.id, { mustangIds, scopeIds });
     const weaponRange = getWeaponRange(myEquipmentTypes);
     if (distance > weaponRange) throw new Error(`Hors de portée (distance ${distance}, votre arme porte à ${weaponRange})`);
@@ -46,6 +47,7 @@ serve(async (req) => {
     await supabaseAdmin.from('players').update({ has_played_bang_this_turn: true }).eq('id', me.id);
     await startPending(gameId, me.id, 'bang_response', [{ playerId: target.id, isCurrentTurn: true }]);
     await logEvent(gameId, 'bang_played', { actorSeat: me.seat_position, targetSeat: target.seat_position });
+    await checkSuzyLafayette(gameId, me.id);
 
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {

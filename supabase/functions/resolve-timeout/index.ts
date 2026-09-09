@@ -5,6 +5,7 @@ import { clearPending } from '../_shared/pending.ts';
 import { pickGeneralStoreCard } from '../_shared/generalStore.ts';
 import { logEvent } from '../_shared/events.ts';
 import { corsHeaders } from '../_shared/cors.ts';
+import { checkSuzyLafayette } from '../_shared/characters.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -36,6 +37,7 @@ serve(async (req) => {
         }
         await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: pick.card_type, suit: pick.suit, value: pick.value });
         await logEvent(gameId, 'card_discarded_forced', { actorSeat: targetPlayer!.seat_position, cardType: pick.card_type });
+        if (pick.kind === 'hand') await checkSuzyLafayette(gameId, targetRow!.player_id);
       }
       await clearPending(gameId);
     } else {
