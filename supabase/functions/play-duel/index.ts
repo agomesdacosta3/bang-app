@@ -1,9 +1,9 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
 import { startPending } from '../_shared/pending.ts';
-import { corsHeaders } from '../_shared/cors.ts';
 import { logEvent } from '../_shared/events.ts';
 import { checkSuzyLafayette } from '../_shared/characters.ts';
+import { corsHeaders } from '../_shared/cors.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -31,13 +31,13 @@ serve(async (req) => {
     await supabaseAdmin.from('hand_cards').delete().eq('id', duelCard.id);
     await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'duel', suit: duelCard.suit, value: duelCard.value });
 
+    const eventId = await logEvent(gameId, 'duel_played', { actorSeat: me.seat_position, targetSeat: target.seat_position });
     await startPending(gameId, me.id, 'duel_response', [
       { playerId: target.id, isCurrentTurn: true },
       { playerId: me.id, isCurrentTurn: false },
-    ]);
-    await logEvent(gameId, 'duel_played', { actorSeat: me.seat_position, targetSeat: target.seat_position });
-    await checkSuzyLafayette(gameId, me.id);
-    
+    ], 20000, eventId);
+    await checkSuzyLafayette(gameId, me.id, eventId);
+
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {
     return new Response(JSON.stringify({ error: err.message }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

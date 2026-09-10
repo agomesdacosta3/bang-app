@@ -16,6 +16,7 @@ serve(async (req) => {
     const { gameId, action, cardType } = await req.json();
     const { data: game } = await supabaseAdmin.from('games').select('*').eq('id', gameId).single();
     if (!game || game.pending_type !== 'duel_response') throw new Error('Aucun Duel en attente');
+    const threadId = game.pending_event_id ?? undefined;
 
     const { data: me } = await supabaseAdmin.from('players').select('*').eq('game_id', gameId).eq('user_id', user.id).single();
     const { data: myPending } = await supabaseAdmin.from('pending_targets').select('*').eq('game_id', gameId).eq('player_id', me!.id).eq('is_current_turn', true).maybeSingle();
@@ -35,8 +36,8 @@ serve(async (req) => {
       await supabaseAdmin.from('pending_targets').update({ is_current_turn: false }).eq('id', myPending.id);
       await supabaseAdmin.from('pending_targets').update({ is_current_turn: true }).eq('id', opponent!.id);
       await supabaseAdmin.from('games').update({ pending_expires_at: new Date(Date.now() + 20_000).toISOString() }).eq('id', gameId);
-      await logEvent(gameId, 'duel_bang_discarded', { actorSeat: me!.seat_position });
-      await checkSuzyLafayette(gameId, me!.id);
+      await logEvent(gameId, 'duel_bang_discarded', { actorSeat: me!.seat_position, threadId });
+      await checkSuzyLafayette(gameId, me!.id, threadId);
     } else if (action === 'drink_beer') {
       const { data: allPlayers } = await supabaseAdmin.from('players').select('is_alive').eq('game_id', gameId);
       const aliveCount = (allPlayers ?? []).filter(p => p.is_alive).length;
@@ -47,12 +48,12 @@ serve(async (req) => {
       await supabaseAdmin.from('hand_cards').delete().eq('id', beerCard.id);
       await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'beer', suit: beerCard.suit, value: beerCard.value });
       await supabaseAdmin.from('players').update({ life_points: 1 }).eq('id', me!.id);
-      await logEvent(gameId, 'beer_saved_from_death', { actorSeat: me!.seat_position });
-      await checkSuzyLafayette(gameId, me!.id);
+      await logEvent(gameId, 'beer_saved_from_death', { actorSeat: me!.seat_position, threadId });
+      await checkSuzyLafayette(gameId, me!.id, threadId);
       await clearPending(gameId);
     } else if (action === 'accept_damage') {
       const { data: opponent } = await supabaseAdmin.from('pending_targets').select('player_id').eq('game_id', gameId).neq('player_id', me!.id).maybeSingle();
-      await applyDamage(gameId, me!.id, 1, opponent?.player_id);
+      await applyDamage(gameId, me!.id, { causedByPlayerId: opponent?.player_id, threadId });
       await clearPending(gameId);
     } else {
       throw new Error('Action inconnue');

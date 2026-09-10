@@ -15,6 +15,7 @@ serve(async (req) => {
     const { gameId, action, cardType } = await req.json();
     const { data: game } = await supabaseAdmin.from('games').select('*').eq('id', gameId).single();
     if (!game || game.pending_type !== 'indians_response') throw new Error('Aucun Indiens! en attente');
+    const threadId = game.pending_event_id ?? undefined;
 
     const { data: me } = await supabaseAdmin.from('players').select('*').eq('game_id', gameId).eq('user_id', user.id).single();
     const { data: myPending } = await supabaseAdmin.from('pending_targets').select('*').eq('game_id', gameId).eq('player_id', me!.id).maybeSingle();
@@ -29,8 +30,8 @@ serve(async (req) => {
       if (!bangCard) throw new Error(useMissed ? 'Vous n’avez pas de carte Raté!' : 'Vous n’avez pas de carte Bang!');
       await supabaseAdmin.from('hand_cards').delete().eq('id', bangCard.id);
       await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: searchType, suit: bangCard.suit, value: bangCard.value });
-      await logEvent(gameId, 'indians_defended', { actorSeat: me!.seat_position });
-      await checkSuzyLafayette(gameId, me!.id);
+      await logEvent(gameId, 'indians_defended', { actorSeat: me!.seat_position, threadId });
+      await checkSuzyLafayette(gameId, me!.id, threadId);
     } else if (action === 'drink_beer') {
       const { data: allPlayers } = await supabaseAdmin.from('players').select('is_alive').eq('game_id', gameId);
       const aliveCount = (allPlayers ?? []).filter(p => p.is_alive).length;
@@ -41,10 +42,10 @@ serve(async (req) => {
       await supabaseAdmin.from('hand_cards').delete().eq('id', beerCard.id);
       await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'beer', suit: beerCard.suit, value: beerCard.value });
       await supabaseAdmin.from('players').update({ life_points: 1 }).eq('id', me!.id);
-      await logEvent(gameId, 'beer_saved_from_death', { actorSeat: me!.seat_position });
-      await checkSuzyLafayette(gameId, me!.id);
+      await logEvent(gameId, 'beer_saved_from_death', { actorSeat: me!.seat_position, threadId });
+      await checkSuzyLafayette(gameId, me!.id, threadId);
     } else if (action === 'accept_damage') {
-      await applyDamage(gameId, me!.id, 1, game.pending_initiator_id);
+      await applyDamage(gameId, me!.id, { causedByPlayerId: game.pending_initiator_id ?? undefined, threadId });
     } else {
       throw new Error('Action inconnue');
     }
@@ -52,7 +53,7 @@ serve(async (req) => {
     await supabaseAdmin.from('pending_targets').delete().eq('id', myPending.id);
     const { data: remaining } = await supabaseAdmin.from('pending_targets').select('id').eq('game_id', gameId);
     if (!remaining || remaining.length === 0) {
-      await supabaseAdmin.from('games').update({ pending_type: null, pending_initiator_id: null, pending_expires_at: null }).eq('id', gameId);
+      await supabaseAdmin.from('games').update({ pending_type: null, pending_initiator_id: null, pending_expires_at: null, pending_event_id: null }).eq('id', gameId);
     }
 
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

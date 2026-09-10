@@ -18,6 +18,7 @@ serve(async (req) => {
     const { gameId, action, cardType } = await req.json();
     const { data: game } = await supabaseAdmin.from('games').select('*').eq('id', gameId).single();
     if (!game || game.pending_type !== 'bang_response') throw new Error('Aucune réponse à un Bang! en attente');
+    const threadId = game.pending_event_id ?? undefined;
 
     const { data: me } = await supabaseAdmin.from('players').select('*').eq('game_id', gameId).eq('user_id', user.id).single();
     const { data: myPending } = await supabaseAdmin.from('pending_targets').select('*').eq('game_id', gameId).eq('player_id', me!.id).maybeSingle();
@@ -31,8 +32,8 @@ serve(async (req) => {
       if (!card) throw new Error(useBang ? 'Vous n’avez pas de carte Bang!' : 'Vous n’avez pas de carte Raté!');
       await supabaseAdmin.from('hand_cards').delete().eq('id', card.id);
       await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: searchType, suit: card.suit, value: card.value });
-      await logEvent(gameId, 'missed_played', { actorSeat: me!.seat_position });
-      await checkSuzyLafayette(gameId, me!.id);
+      await logEvent(gameId, 'missed_played', { actorSeat: me!.seat_position, threadId });
+      await checkSuzyLafayette(gameId, me!.id, threadId);
 
       const newAchieved = myPending.cancels_achieved + 1;
       if (newAchieved >= myPending.cancels_needed) {
@@ -40,7 +41,7 @@ serve(async (req) => {
       } else {
         await supabaseAdmin.from('pending_targets').update({ cancels_achieved: newAchieved }).eq('id', myPending.id);
         await supabaseAdmin.from('games').update({ pending_expires_at: new Date(Date.now() + 20_000).toISOString() }).eq('id', gameId);
-        await logEvent(gameId, 'partial_cancel', { actorSeat: me!.seat_position, amount: newAchieved });
+        await logEvent(gameId, 'partial_cancel', { actorSeat: me!.seat_position, amount: newAchieved, threadId });
       }
     } else if (action === 'try_barrel') {
       const maxTries = await getMaxBarrelTries(me!.id);
@@ -48,21 +49,20 @@ serve(async (req) => {
       if (myPending.barrel_tries_used >= maxTries) throw new Error('Vous avez déjà utilisé tous vos essais de Planque pour ce tir');
 
       await supabaseAdmin.from('pending_targets').update({ barrel_tries_used: myPending.barrel_tries_used + 1 }).eq('id', myPending.id);
-      const drawn = await degainer(gameId, me!.id, c => c.suit === 'hearts');
+      const drawn = await degainer(gameId, me!.id, c => c.suit === 'hearts', threadId);
 
       if (drawn.suit !== 'hearts') {
-        await logEvent(gameId, 'barrel_failed', { actorSeat: me!.seat_position });
+        await logEvent(gameId, 'barrel_failed', { actorSeat: me!.seat_position, threadId });
         return new Response(JSON.stringify({ ok: true, barrelWorked: false, drawnSuit: drawn.suit }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
-
-      await logEvent(gameId, 'barrel_used', { actorSeat: me!.seat_position });
+      await logEvent(gameId, 'barrel_used', { actorSeat: me!.seat_position, threadId });
       const newAchieved = myPending.cancels_achieved + 1;
       if (newAchieved >= myPending.cancels_needed) {
         await clearPending(gameId);
       } else {
         await supabaseAdmin.from('pending_targets').update({ cancels_achieved: newAchieved }).eq('id', myPending.id);
         await supabaseAdmin.from('games').update({ pending_expires_at: new Date(Date.now() + 20_000).toISOString() }).eq('id', gameId);
-        await logEvent(gameId, 'partial_cancel', { actorSeat: me!.seat_position, amount: newAchieved });
+        await logEvent(gameId, 'partial_cancel', { actorSeat: me!.seat_position, amount: newAchieved, threadId });
       }
     } else if (action === 'drink_beer') {
       const { data: allPlayers } = await supabaseAdmin.from('players').select('is_alive').eq('game_id', gameId);
@@ -74,11 +74,11 @@ serve(async (req) => {
       await supabaseAdmin.from('hand_cards').delete().eq('id', beerCard.id);
       await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'beer', suit: beerCard.suit, value: beerCard.value });
       await supabaseAdmin.from('players').update({ life_points: 1 }).eq('id', me!.id);
-      await logEvent(gameId, 'beer_saved_from_death', { actorSeat: me!.seat_position });
-      await checkSuzyLafayette(gameId, me!.id);
+      await logEvent(gameId, 'beer_saved_from_death', { actorSeat: me!.seat_position, threadId });
+      await checkSuzyLafayette(gameId, me!.id, threadId);
       await clearPending(gameId);
     } else if (action === 'accept_damage') {
-      await applyDamage(gameId, me!.id, 1, game.pending_initiator_id);
+      await applyDamage(gameId, me!.id, { causedByPlayerId: game.pending_initiator_id ?? undefined, threadId });
       await clearPending(gameId);
     } else {
       throw new Error('Action inconnue');

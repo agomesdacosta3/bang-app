@@ -20,19 +20,20 @@ serve(async (req) => {
     const { data: me } = await supabaseAdmin.from('players').select('*').eq('game_id', gameId).eq('user_id', user.id).single();
     if (!me || game.current_player_id !== me.id) throw new Error('Ce n’est pas votre tour');
 
-    const { data: equipment } = await supabaseAdmin.from('cards_in_play').select('id, card_type, suit, value').eq('player_id', me.id);
+    const { data: equipment } = await supabaseAdmin.from('cards_in_play').select('id, card_type, suit, value, origin_event_id').eq('player_id', me.id);
     const dynamiteRow = equipment?.find(c => c.card_type === 'dynamite');
     const prisonRow = equipment?.find(c => c.card_type === 'prison');
     if (!dynamiteRow && !prisonRow) throw new Error('Rien à dégainer');
 
     if (dynamiteRow) {
-      const drawn = await degainer(gameId, me.id, c => !(c.suit === 'spades' && c.value >= 2 && c.value <= 9));
+      const threadId = dynamiteRow.origin_event_id ?? undefined;
+      const drawn = await degainer(gameId, me.id, c => !(c.suit === 'spades' && c.value >= 2 && c.value <= 9), threadId);
       await supabaseAdmin.from('cards_in_play').delete().eq('id', dynamiteRow.id);
       const explodes = drawn.suit === 'spades' && drawn.value >= 2 && drawn.value <= 9;
 
       if (explodes) {
         await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'dynamite', suit: dynamiteRow.suit, value: dynamiteRow.value });
-        await applyDamage(gameId, me.id, 3);
+        await applyDamage(gameId, me.id, { amount: 3, threadId });
         const { data: after } = await supabaseAdmin.from('players').select('is_alive').eq('id', me.id).single();
         if (!after!.is_alive) {
           const next = await advanceTurn(gameId, me.id);
@@ -43,21 +44,26 @@ serve(async (req) => {
         const alive = allPlayers!.filter(p => p.is_alive);
         const myIndex = alive.findIndex(p => p.id === me.id);
         const leftNeighbor = alive[(myIndex + 1) % alive.length];
-        await supabaseAdmin.from('cards_in_play').insert({ player_id: leftNeighbor.id, card_type: 'dynamite', suit: dynamiteRow.suit, value: dynamiteRow.value });
-        await logEvent(gameId, 'dynamite_passed', { actorSeat: leftNeighbor.seat_position });
+        // Le passage devient lui-même la nouvelle racine : le prochain dégainer ne se rattachera
+        // qu'à ce passage précis, pas à tout l'historique de la Dynamite.
+        // Pas de threadId transmis ici : "passe à X" devient sa propre racine, un nouveau fil frais
+        // pour ce porteur — exactement ce qu'il faut puisqu'on ne veut garder que le dégainer courant.
+        const passEventId = await logEvent(gameId, 'dynamite_passed', { actorSeat: leftNeighbor.seat_position });
+        await supabaseAdmin.from('cards_in_play').insert({ player_id: leftNeighbor.id, card_type: 'dynamite', suit: dynamiteRow.suit, value: dynamiteRow.value, origin_event_id: passEventId });
       }
     }
 
     if (prisonRow) {
-      const drawn = await degainer(gameId, me.id, c => c.suit === 'hearts');
+      const threadId = prisonRow.origin_event_id ?? undefined;
+      const drawn = await degainer(gameId, me.id, c => c.suit === 'hearts', threadId);
       await supabaseAdmin.from('cards_in_play').delete().eq('id', prisonRow.id);
       await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'prison', suit: prisonRow.suit, value: prisonRow.value });
       if (drawn.suit !== 'hearts') {
-        await logEvent(gameId, 'prison_failed', { actorSeat: me.seat_position });
+        await logEvent(gameId, 'prison_failed', { actorSeat: me.seat_position, threadId });
         const next = await advanceTurn(gameId, me.id);
         return new Response(JSON.stringify({ ok: true, skippedTurn: true, turnEnded: true, nextPlayerId: next.id }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
       }
-      await logEvent(gameId, 'prison_escaped', { actorSeat: me.seat_position });
+      await logEvent(gameId, 'prison_escaped', { actorSeat: me.seat_position, threadId });
     }
 
     return new Response(JSON.stringify({ ok: true, turnEnded: false }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

@@ -1,41 +1,32 @@
 import { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, Alert, Modal, Pressable, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Alert, Modal, ScrollView } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { callFunction } from '../lib/functions';
 import { computeDistance, SeatedPlayer } from '../lib/distance';
 import { getWeaponRange, WEAPON_TYPES } from '../lib/weapons';
-import { colors, fonts, cardLabels, equipmentTags, roleLabels, suitLabels, characterLabels, renderPips } from '../theme';
+import {
+  colors, fonts, cardLabels, equipmentTags, roleLabels, roleObjectives, winnerTeamLabels,
+  characterLabels, characterDescriptions, renderPips,
+} from '../theme';
 import WoodButton from '../components/WoodButton';
 import PlayingCard from '../components/PlayingCard';
 
 type Game = {
   id: string; status: string; current_player_id: string | null; turn_phase: string | null;
-  pending_type: string | null; pending_initiator_id: string | null; pending_expires_at: string | null; winner_team: string | null;
+  pending_type: string | null; pending_initiator_id: string | null; pending_expires_at: string | null;
+  pending_event_id: string | null; winner_team: string | null;
 };
 type Player = SeatedPlayer & { is_sheriff: boolean; life_points: number; max_life_points: number; has_played_bang_this_turn: boolean };
 type HandCard = { id: string; card_type: string; suit: string; value: number };
 type Equipment = { player_id: string; card_type: string };
 type StoreCard = { id: string; card_type: string; suit: string; value: number };
 type DiscardCard = { id: string; card_type: string; suit: string; value: number };
-type GameEvent = { id: string; event_type: string; actor_seat: number | null; target_seat: number | null; amount: number | null; card_type: string | null };
+type GameEvent = {
+  id: string; event_type: string; actor_seat: number | null; target_seat: number | null;
+  amount: number | null; card_type: string | null; thread_id: string | null; created_at: string;
+};
 
-function describeOutcome(recentEvents: GameEvent[]): string {
-  const latest = recentEvents[0];
-  if (!latest) return 'Résolu.';
-  switch (latest.event_type) {
-    case 'player_eliminated': return `Siège ${latest.actor_seat} a encaissé le tir et a été éliminé !`;
-    case 'damage_taken': return `Siège ${latest.actor_seat} a encaissé ${latest.amount ?? 1} point(s) de vie`;
-    case 'missed_played': return `Siège ${latest.actor_seat} a esquivé avec Raté!`;
-    case 'barrel_used': return `Siège ${latest.actor_seat} a esquivé avec la Planque !`;
-    case 'indians_defended': return `Siège ${latest.actor_seat} a défendu avec Bang! contre Indiens!`;
-    case 'store_card_taken': return `Siège ${latest.actor_seat} a récupéré : ${cardLabels[latest.card_type ?? ''] ?? latest.card_type}`;
-    case 'card_discarded_forced': return `Siège ${latest.actor_seat} a défaussé : ${cardLabels[latest.card_type ?? ''] ?? latest.card_type} (Coup de foudre)`;
-    case 'el_gringo_steal': return `Siège ${latest.actor_seat} vole une carte à Siège ${latest.target_seat} (El Gringo)`;
-    case 'vulture_sam_loot': return `Siège ${latest.actor_seat} récupère ${latest.amount} carte(s) de Siège ${latest.target_seat} (Sam le Vautour)`;
-    case 'beer_saved_from_death': return `Siège ${latest.actor_seat} a bu une Bière in extremis et reste à 1 PV !`;
-    default: return 'Résolu.';
-  }
-}
+function isRootEvent(e: GameEvent) { return e.thread_id === e.id; }
 
 function NoticeBox({ title, timer, children }: { title: string; timer?: string; children: React.ReactNode }) {
   return (
@@ -49,6 +40,12 @@ function NoticeBox({ title, timer, children }: { title: string; timer?: string; 
   );
 }
 
+const FLAVOR_BY_TEAM: Record<string, string> = {
+  sheriff: 'La loi triomphe, l\u2019ordre règne à nouveau sur la ville.',
+  outlaws: 'Les hors-la-loi ont eu la peau du Shérif.',
+  renegade: 'Le Renégat s\u2019en tire seul, la trahison a payé.',
+};
+
 export default function GameScreen({ gameId, playerId, onLeave }: { gameId: string; playerId: string; onLeave: () => void }) {
   const [game, setGame] = useState<Game | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -61,6 +58,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const [storeCards, setStoreCards] = useState<StoreCard[]>([]);
   const [discardTop, setDiscardTop] = useState<DiscardCard[]>([]);
   const [handCounts, setHandCounts] = useState<Record<string, number>>({});
+  const [events, setEvents] = useState<GameEvent[]>([]);
   const [targetPickerFor, setTargetPickerFor] = useState<string | null>(null);
   const [bangSourceType, setBangSourceType] = useState<'bang' | 'missed'>('bang');
   const [duelTargetPickerFor, setDuelTargetPickerFor] = useState<string | null>(null);
@@ -76,41 +74,142 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const [sidKetchumMode, setSidKetchumMode] = useState(false);
   const [selectedSidCards, setSelectedSidCards] = useState<string[]>([]);
   const [actionLoading, setActionLoading] = useState(false);
-  const [lastSync, setLastSync] = useState('');
-  const [channelStatus, setChannelStatus] = useState('(pas encore connecté)');
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   const firedTimeoutRef = useRef(false);
-  const pendingWatchRef = useRef<string | null>(null);
+  const actionLoadingRef = useRef(false);
+  const historyScrollRef = useRef<ScrollView>(null);
 
   const me = players.find(p => p.id === playerId);
   const isMyTurn = game?.current_player_id === playerId;
   const hasPending = !!game?.pending_type;
 
-  function seatOf(id: string | null | undefined): number | null {
-    return players.find(p => p.id === id)?.seat_position ?? null;
+  function nameFor(id: string | null | undefined): string {
+    const p = players.find(pl => pl.id === id);
+    if (!p) return 'Un joueur';
+    return characterLabels[charactersMap[p.id]] ?? 'Un joueur';
+  }
+
+  function nameForSeat(seat: number | null): string {
+    if (seat === null || seat === undefined) return 'Un joueur';
+    const p = players.find(pl => pl.seat_position === seat);
+    if (!p) return 'Un joueur';
+    return characterLabels[charactersMap[p.id]] ?? 'Un joueur';
+  }
+
+  function Bold({ children }: { children: React.ReactNode }) {
+    return <Text style={styles.eventBold}>{children}</Text>;
+  }
+
+  function renderEventLine(e: GameEvent): React.ReactNode {
+    const actor = <Bold>{nameForSeat(e.actor_seat)}</Bold>;
+    const target = <Bold>{nameForSeat(e.target_seat)}</Bold>;
+    const card = (type?: string | null) => <Bold>{cardLabels[type ?? ''] ?? type}</Bold>;
+
+    switch (e.event_type) {
+      case 'bang_played': return <>{actor} tire sur {target}</>;
+      case 'missed_played': return <>{actor} esquive avec {card('missed')}</>;
+      case 'barrel_equipped': return <>{actor} pose une {card('barrel')}</>;
+      case 'barrel_used': return <>{actor} esquive avec la {card('barrel')} !</>;
+      case 'barrel_failed': return <>{actor} rate son dégainer de {card('barrel')}</>;
+      case 'damage_taken': return <>{actor} perd {e.amount ?? 1} point(s) de vie</>;
+      case 'player_eliminated': return <>{actor} est éliminé !</>;
+      case 'store_card_taken': return <>{actor} récupère {card(e.card_type)} au Magasin</>;
+      case 'card_discarded_forced': return <>{actor} défausse {card(e.card_type)} (Coup de foudre)</>;
+      case 'beer_played': return <>{actor} boit une {card('beer')}</>;
+      case 'saloon_played': return <>{actor} joue {card('saloon')}, tout le monde est soigné</>;
+      case 'duel_played': return <>{actor} lance un {card('duel')} contre {target}</>;
+      case 'duel_bang_discarded': return <>{actor} continue le Duel avec un {card('bang')}</>;
+      case 'indians_played': return <>{actor} joue {card('indians')}</>;
+      case 'indians_defended': return <>{actor} se défend avec un {card('bang')}</>;
+      case 'gatling_played': return <>{actor} joue {card('gatling')} !</>;
+      case 'prison_played': return <>{actor} met {target} en {card('prison')}</>;
+      case 'prison_failed': return <>{actor} rate son dégainer de {card('prison')}, tour passé</>;
+      case 'prison_escaped': return <>{actor} s'échappe de {card('prison')}</>;
+      case 'dynamite_played': return <>{actor} pose une {card('dynamite')}</>;
+      case 'dynamite_passed': return <>La {card('dynamite')} passe à {actor}</>;
+      case 'weapon_equipped': return <>{actor} s'équipe : {card(e.card_type)}</>;
+      case 'mustang_equipped': return <>{actor} pose un {card('mustang')}</>;
+      case 'scope_equipped': return <>{actor} pose une {card('scope')}</>;
+      case 'panic_played': return <>{actor} vole {card(e.card_type)} à {target}</>;
+      case 'catbalou_played': return <>{actor} joue {card('cat_balou')} sur {target}</>;
+      case 'general_store_played': return <>{actor} joue {card('general_store')}</>;
+      case 'jesse_jones_steal': return <>{actor} pioche dans la main de {target}</>;
+      case 'pedro_ramirez_discard_draw': return <>{actor} pioche depuis la défausse</>;
+      case 'kit_carlson_pick': return <>{actor} choisit 2 cartes parmi 3</>;
+      case 'bart_cassidy_draw': return <>{actor} pioche une carte</>;
+      case 'suzy_lafayette_draw': return <>{actor} pioche une carte, main vide</>;
+      case 'black_jack_bonus_draw': return <>{actor} pioche une carte de plus</>;
+      case 'partial_cancel': return <>{actor} annule partiellement ({e.amount}/2)</>;
+      case 'el_gringo_steal': return <>{actor} vole {e.amount} carte(s) à {target}</>;
+      case 'vulture_sam_loot': return <>{actor} récupère les cartes de {target}</>;
+      case 'sid_ketchum_heal': return <>{actor} défausse 2 cartes, +1 PV</>;
+      case 'beer_saved_from_death': return <>{actor} survit grâce à une {card('beer')} !</>;
+      case 'degainer_draw': return <>{actor} dégaine</>;
+      default: return <>{actor} — {e.event_type}</>;
+    }
   }
 
   function describePendingSituation(): string {
     if (!game?.pending_type) return '';
-    const actorSeat = seatOf(game.pending_initiator_id);
-    const targetSeats = allPendingTargets.map(pt => seatOf(pt.player_id)).filter((s): s is number => s !== null);
+    const actor = nameFor(game.pending_initiator_id);
+    const targetIds = allPendingTargets.map(pt => pt.player_id);
     switch (game.pending_type) {
-      case 'bang_response': return `Siège ${actorSeat} tire sur Siège ${targetSeats[0]} — en attente de sa réponse...`;
-      case 'gatling_response': return `Siège ${actorSeat} a joué Gatling — en attente de ${targetSeats.length} réponse(s)`;
+      case 'bang_response': return `${actor} tire sur ${nameFor(targetIds[0])} — en attente de sa réponse...`;
+      case 'gatling_response': return `${actor} a joué Gatling — en attente de ${targetIds.length} réponse(s)`;
       case 'duel_response': {
+        const otherId = targetIds.find(id => id !== game.pending_initiator_id);
         const current = allPendingTargets.find(pt => pt.is_current_turn);
-        const currentSeat = seatOf(current?.player_id);
-        return `Duel entre Siège ${actorSeat} et Siège ${targetSeats.find(s => s !== actorSeat)} — en attente de Siège ${currentSeat}`;
+        return `Duel entre ${actor} et ${nameFor(otherId)} — en attente de ${nameFor(current?.player_id)}`;
       }
-      case 'indians_response': return `Siège ${actorSeat} a joué Indiens! — en attente de ${targetSeats.length} réponse(s)`;
-      case 'cat_balou_discard': return `Siège ${actorSeat} a joué Coup de foudre sur Siège ${targetSeats[0]} — en attente de son choix`;
+      case 'indians_response': return `${actor} a joué Indiens! — en attente de ${targetIds.length} réponse(s)`;
+      case 'cat_balou_discard': return `${actor} a joué Coup de foudre sur ${nameFor(targetIds[0])} — en attente de son choix`;
       case 'general_store': {
         const current = allPendingTargets.find(pt => pt.is_current_turn);
-        const currentSeat = seatOf(current?.player_id);
-        return `Magasin en cours — au tour de Siège ${currentSeat} de choisir`;
+        return `Magasin en cours — au tour de ${nameFor(current?.player_id)} de choisir`;
       }
       default: return 'Une action est en cours...';
     }
+  }
+
+  async function loadEvents(): Promise<GameEvent[]> {
+    const { data: recent } = await supabase
+      .from('game_events').select('*').eq('game_id', gameId)
+      .order('created_at', { ascending: false }).limit(20);
+    const recentEvents = (recent ?? []) as GameEvent[];
+
+    const knownIds = new Set(recentEvents.map(e => e.id));
+    const missingRootIds = Array.from(new Set(
+      recentEvents.map(e => e.thread_id).filter((id): id is string => !!id && !knownIds.has(id))
+    ));
+
+    let roots: GameEvent[] = [];
+    if (missingRootIds.length) {
+      const { data } = await supabase.from('game_events').select('*').in('id', missingRootIds);
+      roots = (data ?? []) as GameEvent[];
+    }
+
+    const byThread = new Map<string, GameEvent[]>();
+    for (const e of [...recentEvents, ...roots]) {
+      const key = e.thread_id ?? e.id;
+      if (!byThread.has(key)) byThread.set(key, []);
+      byThread.get(key)!.push(e);
+    }
+
+    const groups = Array.from(byThread.values()).map(evs => {
+      evs.sort((a, b) => {
+        if (isRootEvent(a) && !isRootEvent(b)) return -1;
+        if (!isRootEvent(a) && isRootEvent(b)) return 1;
+        return new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      });
+      const lastTime = evs.reduce((max, e) => Math.max(max, new Date(e.created_at).getTime()), 0);
+      return { evs, lastTime };
+    });
+
+    // Chaque groupe est positionné selon son événement le PLUS RÉCENT, pas sa racine —
+    // un fil qui reçoit une nouvelle ligne remonte donc en bas de la liste.
+    groups.sort((a, b) => a.lastTime - b.lastTime);
+
+    return groups.flatMap(g => g.evs);
   }
 
   async function loadAll() {
@@ -123,6 +222,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     const { data: sc } = await supabase.from('general_store_cards').select('id, card_type, suit, value').eq('game_id', gameId);
     const { data: dt } = await supabase.from('discard_pile').select('id, card_type, suit, value').eq('game_id', gameId).order('discarded_at', { ascending: false }).limit(3);
     const { data: hc } = p?.length ? await supabase.from('hand_counts').select('player_id, count').in('player_id', p.map(pl => pl.id)) : { data: [] };
+    const groupedEvents = await loadEvents();
 
     const eliminatedIds = (p ?? []).filter(pl => !pl.is_alive).map(pl => pl.id);
     const idsForRoles = Array.from(new Set([...eliminatedIds, playerId]));
@@ -146,9 +246,9 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     setStoreCards(sc ?? []);
     setDiscardTop(dt ?? []);
     setHandCounts(hcMap);
+    setEvents(groupedEvents);
     setRolesMap(map);
     setCharactersMap(charMap);
-    setLastSync(new Date().toLocaleTimeString());
   }
 
   useEffect(() => {
@@ -163,7 +263,8 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
       .on('postgres_changes', { event: '*', schema: 'public', table: 'general_store_cards', filter: `game_id=eq.${gameId}` }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'player_characters' }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'discard_pile', filter: `game_id=eq.${gameId}` }, loadAll)
-      .subscribe((status) => setChannelStatus(status));
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'game_events', filter: `game_id=eq.${gameId}` }, loadAll)
+      .subscribe();
     return () => { supabase.removeChannel(channel); };
   }, [gameId, playerId]);
 
@@ -171,6 +272,10 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     const interval = setInterval(loadAll, 8000);
     return () => clearInterval(interval);
   }, [gameId, playerId]);
+
+  useEffect(() => {
+    historyScrollRef.current?.scrollToEnd({ animated: true });
+  }, [events]);
 
   useEffect(() => {
     firedTimeoutRef.current = false;
@@ -190,23 +295,25 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   }, [game?.pending_expires_at, gameId]);
 
   useEffect(() => {
-    if (game?.pending_type && game.pending_initiator_id === playerId) {
-      pendingWatchRef.current = game.pending_type;
-    } else if (!game?.pending_type && pendingWatchRef.current) {
-      pendingWatchRef.current = null;
-      if (game?.status !== 'finished') {
-        (async () => {
-          const { data: recent } = await supabase.from('game_events').select('*').eq('game_id', gameId).order('created_at', { ascending: false }).limit(2);
-          if (recent?.length) Alert.alert('Résultat', describeOutcome(recent as GameEvent[]));
-        })();
-      }
+    if (!(isMyTurn && game?.turn_phase === 'play')) {
+      setDiscarding(false);
+      setSelectedDiscards([]);
     }
-  }, [game?.pending_type, game?.pending_initiator_id, game?.status, gameId, playerId]);
+  }, [isMyTurn, game?.turn_phase]);
 
   async function runAction(action: () => Promise<void>) {
-    if (actionLoading) return;
+    if (actionLoadingRef.current) return;
+    actionLoadingRef.current = true;
     setActionLoading(true);
-    try { await action(); } catch (err: any) { Alert.alert('Erreur', err.message); } finally { setActionLoading(false); }
+    try {
+      await action();
+      await loadAll();
+    } catch (err: any) {
+      Alert.alert('Erreur', err.message);
+    } finally {
+      actionLoadingRef.current = false;
+      setActionLoading(false);
+    }
   }
 
   const handleDegainer = () => runAction(() => callFunction('resolve-start-of-turn', { gameId }));
@@ -218,7 +325,8 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const handleDrawPedroDiscard = () => runAction(() => callFunction('draw-pedro-discard', { gameId }));
 
   async function handlePeekKitCarlson() {
-    if (actionLoading) return;
+    if (actionLoadingRef.current) return;
+    actionLoadingRef.current = true;
     setActionLoading(true);
     try {
       const result = await callFunction('peek-kit-carlson', { gameId });
@@ -227,6 +335,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     } catch (err: any) {
       Alert.alert('Erreur', err.message);
     } finally {
+      actionLoadingRef.current = false;
       setActionLoading(false);
     }
   }
@@ -282,43 +391,23 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     setCatbalouTargetPickerFor(null);
     return runAction(() => callFunction('play-catbalou', { gameId, targetPlayerId }));
   };
+  const handleTryBarrel = () => runAction(() => callFunction('respond-bang', { gameId, action: 'try_barrel' }));
+  const handleTryBarrelGatling = () => runAction(() => callFunction('respond-gatling', { gameId, action: 'try_barrel' }));
 
   async function handleSteal(source: 'hand' | 'in_play', cardType?: string) {
-    if (!stealFlow || actionLoading) return;
+    if (!stealFlow || actionLoadingRef.current) return;
     const { targetId } = stealFlow;
     setStealFlow(null);
+    actionLoadingRef.current = true;
     setActionLoading(true);
     try {
       const result = await callFunction('play-panic', { gameId, targetPlayerId: targetId, source, cardType });
+      await loadAll();
       Alert.alert('Braquage!', `Vous avez récupéré : ${cardLabels[result?.stolenCardType] ?? result?.stolenCardType ?? 'une carte'}`);
     } catch (err: any) {
       Alert.alert('Erreur', err.message);
     } finally {
-      setActionLoading(false);
-    }
-  }
-
-  async function handleTryBarrel() {
-    if (actionLoading) return;
-    setActionLoading(true);
-    try {
-      const result = await callFunction('respond-bang', { gameId, action: 'try_barrel' });
-      if (result?.barrelWorked === false) Alert.alert('Planque ratée', `Carte tirée : ${suitLabels[result.drawnSuit] ?? result.drawnSuit}. Choisissez une autre réponse.`);
-    } catch (err: any) {
-      Alert.alert('Erreur', err.message);
-    } finally {
-      setActionLoading(false);
-    }
-  }
-  async function handleTryBarrelGatling() {
-    if (actionLoading) return;
-    setActionLoading(true);
-    try {
-      const result = await callFunction('respond-gatling', { gameId, action: 'try_barrel' });
-      if (result?.barrelWorked === false) Alert.alert('Planque ratée', `Carte tirée : ${suitLabels[result.drawnSuit] ?? result.drawnSuit}. Choisissez une autre réponse.`);
-    } catch (err: any) {
-      Alert.alert('Erreur', err.message);
-    } finally {
+      actionLoadingRef.current = false;
       setActionLoading(false);
     }
   }
@@ -366,10 +455,18 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   }
 
   if (game.status === 'finished') {
+    const myRoleFinal = me.is_sheriff ? 'sheriff' : rolesMap[playerId];
+    const iWon =
+      (game.winner_team === 'sheriff' && (myRoleFinal === 'sheriff' || myRoleFinal === 'deputy')) ||
+      (game.winner_team === 'outlaws' && myRoleFinal === 'outlaw') ||
+      (game.winner_team === 'renegade' && myRoleFinal === 'renegade');
+    const teamLabel = winnerTeamLabels[game.winner_team ?? ''] ?? game.winner_team;
     return (
       <View style={styles.centerContainer}>
-        <Text style={styles.title}>Partie terminée</Text>
-        <Text style={styles.bodyText}>Camp vainqueur : {game.winner_team}</Text>
+        <Text style={[styles.title, { color: iWon ? colors.sage : colors.blood }]}>{iWon ? 'Victoire !' : 'Défaite'}</Text>
+        <Text style={styles.bodyText}>Camp vainqueur : {teamLabel}</Text>
+        <Text style={styles.hint}>{FLAVOR_BY_TEAM[game.winner_team ?? ''] ?? ''}</Text>
+        <Text style={styles.bodyText}>Vous étiez {roleLabels[myRoleFinal] ?? '...'} {iWon ? '— bravo !' : '— la prochaine fois peut-être.'}</Text>
         <View style={{ height: 16 }} />
         <WoodButton title="Retour à l'accueil" onPress={onLeave} variant="primary" />
       </View>
@@ -453,91 +550,111 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
           <Text style={styles.plaqueRole}>{roleLabels[myRole] ?? '...'}</Text>
           <Text style={styles.plaquePips}>{renderPips(me.life_points, me.max_life_points)}</Text>
         </View>
+        <Text style={styles.plaqueObjective}>{roleObjectives[myRole] ?? ''}</Text>
         <Text style={styles.plaqueSub}>{characterLabels[myCharacter] ?? '...'} · {myWeaponName} (portée {myWeaponRange})</Text>
+        <Text style={styles.plaqueDescription}>{characterDescriptions[myCharacter] ?? ''}</Text>
       </View>
-      <Text style={styles.debugHint}>Dernière synchro : {lastSync || '—'} · Canal : {channelStatus}</Text>
 
-      {mustRespondToBang && (
-        <NoticeBox title="Avis" timer={timerLabel}>
-          <Text style={styles.noticeBody}>Vous êtes visé par un Bang! Répondez :</Text>
-          {myPendingRow!.cancels_needed > 1 && (
-            <Text style={styles.noticeMeta}>Annulations : {myPendingRow!.cancels_achieved}/{myPendingRow!.cancels_needed} (Slab le Flingueur)</Text>
+      <Text style={styles.sectionTitle}>Actions récentes</Text>
+      <View style={styles.historyBox}>
+        <ScrollView ref={historyScrollRef} nestedScrollEnabled>
+          {events.length === 0 ? (
+            <Text style={styles.noticeBody}>Aucun événement pour l'instant.</Text>
+          ) : (
+            events.map(e => {
+              const isChild = !isRootEvent(e);
+              const isActiveThread = !!game.pending_event_id && e.thread_id === game.pending_event_id;
+              return (
+                <Text
+                  key={e.id}
+                  style={[styles.noticeBody, isChild && styles.noticeBodyChild, isActiveThread && styles.noticeBodyActive]}
+                >
+                  {isChild ? '↳ ' : '• '}{renderEventLine(e)}
+                </Text>
+              );
+            })
           )}
-          {hasMissed && <WoodButton title="Jouer Raté!" onPress={() => handleRespond('missed')} disabled={actionLoading} style={styles.noticeBtn} />}
-          {isCalamityJanet && hasBang && <WoodButton title="Jouer Bang! comme Raté!" onPress={() => handleRespond('missed', 'bang')} disabled={actionLoading} style={styles.noticeBtn} />}
-          {canTryBarrel && <WoodButton title="Essayer la Planque" onPress={handleTryBarrel} disabled={actionLoading} style={styles.noticeBtn} />}
-          {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => handleRespond('drink_beer')} disabled={actionLoading} variant="safe" style={styles.noticeBtn} />}
-          <WoodButton title="Encaisser les dégâts" onPress={() => handleRespond('accept_damage')} disabled={actionLoading} variant="primary" style={styles.noticeBtn} />
-        </NoticeBox>
-      )}
+        </ScrollView>
+      </View>
 
-      {mustRespondToGatling && (
-        <NoticeBox title="Avis" timer={timerLabel}>
-          <Text style={styles.noticeBody}>Gatling ! Répondez :</Text>
-          {hasMissed && <WoodButton title="Jouer Raté!" onPress={() => handleRespondGatling('missed')} disabled={actionLoading} style={styles.noticeBtn} />}
-          {isCalamityJanet && hasBang && <WoodButton title="Jouer Bang! comme Raté!" onPress={() => handleRespondGatling('missed', 'bang')} disabled={actionLoading} style={styles.noticeBtn} />}
-          {canTryBarrel && <WoodButton title="Essayer la Planque" onPress={handleTryBarrelGatling} disabled={actionLoading} style={styles.noticeBtn} />}
-          {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => handleRespondGatling('drink_beer')} disabled={actionLoading} variant="safe" style={styles.noticeBtn} />}
-          <WoodButton title="Encaisser les dégâts" onPress={() => handleRespondGatling('accept_damage')} disabled={actionLoading} variant="primary" style={styles.noticeBtn} />
-        </NoticeBox>
-      )}
-
-      {mustRespondToDuel && (
-        <NoticeBox title="Avis" timer={timerLabel}>
-          <Text style={styles.noticeBody}>Duel ! Continuez ou encaissez :</Text>
-          {hasBang && <WoodButton title="Jouer Bang!" onPress={() => handleRespondDuel('discard_bang')} disabled={actionLoading} style={styles.noticeBtn} />}
-          {isCalamityJanet && hasMissed && <WoodButton title="Jouer Raté! comme Bang!" onPress={() => handleRespondDuel('discard_bang', 'missed')} disabled={actionLoading} style={styles.noticeBtn} />}
-          {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => handleRespondDuel('drink_beer')} disabled={actionLoading} variant="safe" style={styles.noticeBtn} />}
-          <WoodButton title="Encaisser les dégâts" onPress={() => handleRespondDuel('accept_damage')} disabled={actionLoading} variant="primary" style={styles.noticeBtn} />
-        </NoticeBox>
-      )}
-
-      {mustRespondToIndians && (
-        <NoticeBox title="Avis" timer={timerLabel}>
-          <Text style={styles.noticeBody}>Indiens! Défendez-vous ou encaissez :</Text>
-          {hasBang && <WoodButton title="Jouer Bang!" onPress={() => handleRespondIndians('discard_bang')} disabled={actionLoading} style={styles.noticeBtn} />}
-          {isCalamityJanet && hasMissed && <WoodButton title="Jouer Raté! comme Bang!" onPress={() => handleRespondIndians('discard_bang', 'missed')} disabled={actionLoading} style={styles.noticeBtn} />}
-          {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => handleRespondIndians('drink_beer')} disabled={actionLoading} variant="safe" style={styles.noticeBtn} />}
-          <WoodButton title="Encaisser les dégâts" onPress={() => handleRespondIndians('accept_damage')} disabled={actionLoading} variant="primary" style={styles.noticeBtn} />
-        </NoticeBox>
-      )}
-
-      {mustChooseCatBalouDiscard && (
-        <NoticeBox title="Avis" timer={timerLabel}>
-          <Text style={styles.noticeBody}>Coup de foudre ! Choisissez une carte à défausser :</Text>
-          {hand.map(c => (
-            <WoodButton key={c.id} title={`${cardLabels[c.card_type] ?? c.card_type} (main)`} onPress={() => handleRespondCatBalouHand(c.id)} disabled={actionLoading} style={styles.noticeBtn} />
-          ))}
-          {myEquipmentTypes.map(t => (
-            <WoodButton key={t} title={`${cardLabels[t] ?? t} (en jeu)`} onPress={() => handleRespondCatBalouEquip(t)} disabled={actionLoading} style={styles.noticeBtn} />
-          ))}
-        </NoticeBox>
-      )}
-
-      {game.pending_type === 'general_store' && (
-        <NoticeBox title="Avis" timer={timerLabel}>
-          {isMyStoreTurn ? (
+      <View style={styles.noticeHeader}>
+        <Text style={styles.sectionTitle}>Confrontation</Text>
+        {hasPending && !!timerLabel && <Text style={styles.noticeTimer}>{timerLabel}</Text>}
+      </View>
+      <View style={styles.notice}>
+        <ScrollView style={styles.confrontationScroll} nestedScrollEnabled>
+          {!hasPending && <Text style={styles.noticeBody}>Aucune confrontation en cours.</Text>}
+          {mustRespondToBang && (
+            <>
+              <Text style={styles.noticeBody}>Vous êtes visé par un Bang! Répondez :</Text>
+              {myPendingRow!.cancels_needed > 1 && (
+                <Text style={styles.noticeMeta}>Annulations : {myPendingRow!.cancels_achieved}/{myPendingRow!.cancels_needed} (Slab le Flingueur)</Text>
+              )}
+              {hasMissed && <WoodButton title="Jouer Raté!" onPress={() => handleRespond('missed')} disabled={actionLoading} style={styles.noticeBtn} />}
+              {isCalamityJanet && hasBang && <WoodButton title="Jouer Bang! comme Raté!" onPress={() => handleRespond('missed', 'bang')} disabled={actionLoading} style={styles.noticeBtn} />}
+              {canTryBarrel && <WoodButton title="Essayer la Planque" onPress={handleTryBarrel} disabled={actionLoading} style={styles.noticeBtn} />}
+              {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => handleRespond('drink_beer')} disabled={actionLoading} variant="safe" style={styles.noticeBtn} />}
+              <WoodButton title="Encaisser les dégâts" onPress={() => handleRespond('accept_damage')} disabled={actionLoading} variant="primary" style={styles.noticeBtn} />
+            </>
+          )}
+          {mustRespondToGatling && (
+            <>
+              <Text style={styles.noticeBody}>Gatling ! Répondez :</Text>
+              {hasMissed && <WoodButton title="Jouer Raté!" onPress={() => handleRespondGatling('missed')} disabled={actionLoading} style={styles.noticeBtn} />}
+              {isCalamityJanet && hasBang && <WoodButton title="Jouer Bang! comme Raté!" onPress={() => handleRespondGatling('missed', 'bang')} disabled={actionLoading} style={styles.noticeBtn} />}
+              {canTryBarrel && <WoodButton title="Essayer la Planque" onPress={handleTryBarrelGatling} disabled={actionLoading} style={styles.noticeBtn} />}
+              {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => handleRespondGatling('drink_beer')} disabled={actionLoading} variant="safe" style={styles.noticeBtn} />}
+              <WoodButton title="Encaisser les dégâts" onPress={() => handleRespondGatling('accept_damage')} disabled={actionLoading} variant="primary" style={styles.noticeBtn} />
+            </>
+          )}
+          {mustRespondToDuel && (
+            <>
+              <Text style={styles.noticeBody}>Duel ! Continuez ou encaissez :</Text>
+              {hasBang && <WoodButton title="Jouer Bang!" onPress={() => handleRespondDuel('discard_bang')} disabled={actionLoading} style={styles.noticeBtn} />}
+              {isCalamityJanet && hasMissed && <WoodButton title="Jouer Raté! comme Bang!" onPress={() => handleRespondDuel('discard_bang', 'missed')} disabled={actionLoading} style={styles.noticeBtn} />}
+              {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => handleRespondDuel('drink_beer')} disabled={actionLoading} variant="safe" style={styles.noticeBtn} />}
+              <WoodButton title="Encaisser les dégâts" onPress={() => handleRespondDuel('accept_damage')} disabled={actionLoading} variant="primary" style={styles.noticeBtn} />
+            </>
+          )}
+          {mustRespondToIndians && (
+            <>
+              <Text style={styles.noticeBody}>Indiens! Défendez-vous ou encaissez :</Text>
+              {hasBang && <WoodButton title="Jouer Bang!" onPress={() => handleRespondIndians('discard_bang')} disabled={actionLoading} style={styles.noticeBtn} />}
+              {isCalamityJanet && hasMissed && <WoodButton title="Jouer Raté! comme Bang!" onPress={() => handleRespondIndians('discard_bang', 'missed')} disabled={actionLoading} style={styles.noticeBtn} />}
+              {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => handleRespondIndians('drink_beer')} disabled={actionLoading} variant="safe" style={styles.noticeBtn} />}
+              <WoodButton title="Encaisser les dégâts" onPress={() => handleRespondIndians('accept_damage')} disabled={actionLoading} variant="primary" style={styles.noticeBtn} />
+            </>
+          )}
+          {mustChooseCatBalouDiscard && (
+            <>
+              <Text style={styles.noticeBody}>Coup de foudre ! Choisissez une carte à défausser :</Text>
+              {hand.map(c => (
+                <WoodButton key={c.id} title={`${cardLabels[c.card_type] ?? c.card_type} (main)`} onPress={() => handleRespondCatBalouHand(c.id)} disabled={actionLoading} style={styles.noticeBtn} />
+              ))}
+              {myEquipmentTypes.map(t => (
+                <WoodButton key={t} title={`${cardLabels[t] ?? t} (en jeu)`} onPress={() => handleRespondCatBalouEquip(t)} disabled={actionLoading} style={styles.noticeBtn} />
+              ))}
+            </>
+          )}
+          {isMyStoreTurn && (
             <>
               <Text style={styles.noticeBody}>Magasin — choisissez une carte :</Text>
               {storeCards.map(c => (
                 <WoodButton key={c.id} title={cardLabels[c.card_type] ?? c.card_type} onPress={() => handlePickStoreCard(c.id)} disabled={actionLoading} style={styles.noticeBtn} />
               ))}
             </>
-          ) : (
-            <Text style={styles.noticeBody}>{describePendingSituation()}</Text>
           )}
-        </NoticeBox>
-      )}
+          {waitingOnOthers && <Text style={styles.noticeBody}>{describePendingSituation()}</Text>}
+        </ScrollView>
+      </View>
 
-      {waitingOnOthers && (
-        <NoticeBox title={amDead ? 'Vous êtes éliminé' : 'En attente de votre tour'} timer={timerLabel}>
-          <Text style={styles.noticeBody}>{describePendingSituation()}</Text>
-        </NoticeBox>
-      )}
-
-      {!hasPending && !isMyTurn && (
+      {!hasPending && (
         <Text style={styles.waitingText}>
-          {amDead ? 'Vous êtes éliminé' : 'En attente de votre tour'} — c'est au siège {players.find(p => p.id === game.current_player_id)?.seat_position} de jouer
+          {amDead
+            ? 'Vous êtes éliminé'
+            : isMyTurn
+              ? ''
+              : `En attente de votre tour — c'est au tour de ${nameFor(game.current_player_id)}`}
         </Text>
       )}
 
@@ -668,6 +785,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
       )}
 
       <Text style={styles.sectionTitle}>Joueurs</Text>
+      <Text style={styles.hint}>★ = Shérif</Text>
       {players.map(item => {
         const tags = equipment.filter(e => e.player_id === item.id).map(e => equipmentTags[e.card_type]).join(' ');
         const role = item.is_sheriff ? 'sheriff' : rolesMap[item.id];
@@ -675,17 +793,20 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
         const isOther = item.id !== playerId && item.is_alive && !amDead;
         const distTo = isOther ? computeDistance(players, playerId, item.id, equipmentFlags) : null;
         const distFrom = isOther ? computeDistance(players, item.id, playerId, equipmentFlags) : null;
+        const isCurrentTurn = item.id === game.current_player_id && item.is_alive;
         return (
-          <View key={item.id} style={styles.playerRow}>
-            <View style={styles.seatBadge}><Text style={styles.seatBadgeText}>{item.seat_position}</Text></View>
+          <View key={item.id} style={[styles.playerRow, isCurrentTurn && styles.playerRowActive]}>
+            <View style={styles.seatBadge}>
+              <Text style={styles.seatBadgeText}>{item.is_alive ? `${item.life_points}\u2764` : '\u2620'}</Text>
+            </View>
             <View style={styles.playerInfo}>
-              <Text style={styles.playerName}>
+              <Text style={[styles.playerName, !item.is_alive && styles.playerNameDead]}>
                 {character}{item.is_sheriff ? ' ★' : ''}{item.id === playerId ? ' (vous)' : ''} {tags}
               </Text>
               {item.is_alive ? (
                 <Text style={styles.playerMeta}>
                   {renderPips(item.life_points, item.max_life_points)}
-                  {isOther ? `  ·  vous→lui : ${distTo}  ·  lui→vous : ${distFrom}` : ''}
+                  {isOther ? `  ·  moi→lui : ${distTo}  ·  lui→moi : ${distFrom}` : ''}
                 </Text>
               ) : (
                 <Text style={styles.playerMeta}>éliminé — {roleLabels[role] ?? role}</Text>
@@ -695,11 +816,12 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
         );
       })}
 
-      <Text style={styles.sectionTitle}>Défausse</Text>
+      <Text style={styles.sectionTitle}>Haut de la défausse</Text>
       <View style={styles.discardRow}>
         {discardTop.length === 0 && <Text style={styles.hint}>Vide</Text>}
         {discardTop.map((c, i) => (
-          <View key={c.id} style={{ marginLeft: i === 0 ? 0 : -16 }}>
+          <View key={c.id} style={styles.discardItem}>
+            {i === 0 && <Text style={styles.discardLatestLabel}>Dernière</Text>}
             <PlayingCard cardType={c.card_type} suit={c.suit} value={c.value} size="small" />
           </View>
         ))}
@@ -709,7 +831,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Choisir une cible (portée {myWeaponRange})</Text>
-            {bangTargets.map(t => <WoodButton key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayBang(t.id)} style={styles.noticeBtn} />)}
+            {bangTargets.map(t => <WoodButton key={t.id} title={characterLabels[charactersMap[t.id]] ?? '...'} onPress={() => handlePlayBang(t.id)} style={styles.noticeBtn} />)}
             <WoodButton title="Annuler" onPress={() => setTargetPickerFor(null)} variant="muted" style={styles.noticeBtn} />
           </View>
         </View>
@@ -719,7 +841,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Choisir une cible pour le Duel</Text>
-            {duelTargets.map(t => <WoodButton key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayDuel(t.id)} style={styles.noticeBtn} />)}
+            {duelTargets.map(t => <WoodButton key={t.id} title={characterLabels[charactersMap[t.id]] ?? '...'} onPress={() => handlePlayDuel(t.id)} style={styles.noticeBtn} />)}
             <WoodButton title="Annuler" onPress={() => setDuelTargetPickerFor(null)} variant="muted" style={styles.noticeBtn} />
           </View>
         </View>
@@ -729,7 +851,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Choisir une cible pour Prison</Text>
-            {prisonTargets.map(t => <WoodButton key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayPrison(t.id)} style={styles.noticeBtn} />)}
+            {prisonTargets.map(t => <WoodButton key={t.id} title={characterLabels[charactersMap[t.id]] ?? '...'} onPress={() => handlePlayPrison(t.id)} style={styles.noticeBtn} />)}
             <WoodButton title="Annuler" onPress={() => setPrisonTargetPickerFor(null)} variant="muted" style={styles.noticeBtn} />
           </View>
         </View>
@@ -740,7 +862,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Choisir une cible pour Braquage! (portée 1)</Text>
             {panicTargets.map(t => (
-              <WoodButton key={t.id} title={`Siège ${t.seat_position}`} onPress={() => { setPanicTargetPickerFor(null); setStealFlow({ targetId: t.id }); }} style={styles.noticeBtn} />
+              <WoodButton key={t.id} title={characterLabels[charactersMap[t.id]] ?? '...'} onPress={() => { setPanicTargetPickerFor(null); setStealFlow({ targetId: t.id }); }} style={styles.noticeBtn} />
             ))}
             <WoodButton title="Annuler" onPress={() => setPanicTargetPickerFor(null)} variant="muted" style={styles.noticeBtn} />
           </View>
@@ -751,7 +873,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Choisir une cible pour Coup de foudre</Text>
-            {catBalouTargets.map(t => <WoodButton key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayCatBalou(t.id)} style={styles.noticeBtn} />)}
+            {catBalouTargets.map(t => <WoodButton key={t.id} title={characterLabels[charactersMap[t.id]] ?? '...'} onPress={() => handlePlayCatBalou(t.id)} style={styles.noticeBtn} />)}
             <WoodButton title="Annuler" onPress={() => setCatbalouTargetPickerFor(null)} variant="muted" style={styles.noticeBtn} />
           </View>
         </View>
@@ -774,7 +896,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Piocher dans la main de qui ?</Text>
-            {jesseTargets.map(t => <WoodButton key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handleDrawJesseSteal(t.id)} style={styles.noticeBtn} />)}
+            {jesseTargets.map(t => <WoodButton key={t.id} title={characterLabels[charactersMap[t.id]] ?? '...'} onPress={() => handleDrawJesseSteal(t.id)} style={styles.noticeBtn} />)}
             <WoodButton title="Annuler" onPress={() => setJesseTargetPicker(false)} variant="muted" style={styles.noticeBtn} />
           </View>
         </View>
@@ -789,38 +911,51 @@ const styles = StyleSheet.create({
   centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, gap: 8, backgroundColor: colors.parchment },
   title: { fontFamily: fonts.display, fontSize: 28, color: colors.blood },
   bodyText: { fontFamily: fonts.body, fontSize: 14, color: colors.ink },
-  hint: { fontFamily: fonts.body, fontSize: 13, color: colors.leatherDark, fontStyle: 'italic' },
-  debugHint: { fontFamily: fonts.body, fontSize: 10, color: colors.leatherDark, opacity: 0.7, marginBottom: 8 },
-  plaque: { backgroundColor: colors.leather, borderWidth: 2, borderColor: colors.ink, borderRadius: 10, padding: 14 },
-  plaqueRoleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  hint: { fontFamily: fonts.body, fontSize: 12, color: colors.leatherDark, fontStyle: 'italic', marginBottom: 4 },
+  plaque: { backgroundColor: colors.leather, borderWidth: 2, borderColor: colors.ink, borderRadius: 10, padding: 14, gap: 2 },
+  plaqueRoleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 2 },
   starIcon: { color: colors.brass, fontSize: 16 },
   plaqueRole: { fontFamily: fonts.display, fontSize: 17, color: colors.parchmentLight },
   plaquePips: { fontFamily: fonts.body, fontSize: 15, color: colors.brass, letterSpacing: 2 },
-  plaqueSub: { fontFamily: fonts.body, fontSize: 12, color: colors.parchmentLight, opacity: 0.9 },
-  sectionTitle: { fontFamily: fonts.display, fontSize: 16, color: colors.leatherDark, marginTop: 18, marginBottom: 6 },
+  plaqueObjective: { fontFamily: fonts.body, fontSize: 11, color: colors.parchmentLight, opacity: 0.85, fontStyle: 'italic' },
+  plaqueSub: { fontFamily: fonts.body, fontSize: 12, color: colors.parchmentLight, opacity: 0.95, marginTop: 6 },
+  plaqueDescription: { fontFamily: fonts.body, fontSize: 11, color: colors.parchmentLight, opacity: 0.85 },
+  sectionTitle: { fontFamily: fonts.display, fontSize: 16, color: colors.leatherDark, marginTop: 18, marginBottom: 4 },
+  historyBox: {
+    height: 180, backgroundColor: colors.parchmentLight, borderWidth: 2, borderColor: colors.ink,
+    borderStyle: 'dashed', borderRadius: 6, padding: 10,
+  },
+  confrontationScroll: { height: 170, marginTop: 2 },
   notice: {
     backgroundColor: colors.parchmentLight, borderWidth: 2, borderColor: colors.ink, borderStyle: 'dashed',
-    borderRadius: 6, padding: 12, marginTop: 10, gap: 6,
+    borderRadius: 6, padding: 12, marginTop: 10, gap: 3,
   },
   noticeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   noticeTitle: { fontFamily: fonts.display, fontSize: 14, color: colors.blood },
   noticeTimer: { fontFamily: fonts.bodyBold, fontSize: 12, color: colors.leatherDark },
   noticeBody: { fontFamily: fonts.body, fontSize: 13, color: colors.ink, lineHeight: 18 },
+  noticeBodyChild: { marginLeft: 18, color: colors.leatherDark },
+  noticeBodyActive: { color: colors.brass },
   noticeMeta: { fontFamily: fonts.body, fontSize: 12, color: colors.leatherDark, fontStyle: 'italic' },
   noticeBtn: { marginTop: 4 },
-  waitingText: { fontFamily: fonts.body, fontSize: 13, color: colors.leatherDark, marginTop: 10, fontStyle: 'italic' },
+  eventBold: { fontFamily: fonts.bodyBold },
+  waitingText: { fontFamily: fonts.body, fontSize: 13, color: colors.leatherDark, marginTop: 4, fontStyle: 'italic' },
   handRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingVertical: 6 },
   fullWidthBtn: { marginTop: 10 },
   playerRow: {
-    flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8,
-    borderBottomWidth: 1, borderBottomColor: 'rgba(43,27,18,0.15)',
+    flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, paddingHorizontal: 4,
+    borderBottomWidth: 1, borderBottomColor: 'rgba(43,27,18,0.15)', borderRadius: 6,
   },
-  seatBadge: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.leather, alignItems: 'center', justifyContent: 'center' },
-  seatBadgeText: { fontFamily: fonts.bodyBold, color: colors.parchmentLight, fontSize: 13 },
+  playerRowActive: { backgroundColor: 'rgba(198,149,43,0.22)' },
+  seatBadge: { minWidth: 34, height: 28, borderRadius: 14, backgroundColor: colors.leather, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  seatBadgeText: { fontFamily: fonts.bodyBold, color: colors.parchmentLight, fontSize: 12 },
   playerInfo: { flex: 1 },
   playerName: { fontFamily: fonts.bodyBold, fontSize: 14, color: colors.ink },
+  playerNameDead: { textDecorationLine: 'line-through', color: colors.leatherDark },
   playerMeta: { fontFamily: fonts.body, fontSize: 12, color: colors.leatherDark, marginTop: 1 },
-  discardRow: { flexDirection: 'row', paddingVertical: 6, paddingLeft: 8 },
+  discardRow: { flexDirection: 'row', gap: 16, paddingVertical: 6, paddingLeft: 4 },
+  discardItem: { alignItems: 'center', gap: 3 },
+  discardLatestLabel: { fontFamily: fonts.bodyBold, fontSize: 10, color: colors.brass },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(43,27,18,0.6)', justifyContent: 'center', alignItems: 'center' },
   modalBox: { backgroundColor: colors.parchmentLight, borderWidth: 2, borderColor: colors.ink, borderRadius: 12, padding: 20, width: '82%', gap: 8 },
   modalTitle: { fontFamily: fonts.display, fontSize: 15, color: colors.leatherDark, marginBottom: 6 },

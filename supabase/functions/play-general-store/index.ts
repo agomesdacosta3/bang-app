@@ -1,7 +1,7 @@
 import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
-import { drawFromDeck } from '../_shared/deck.ts';
 import { corsHeaders } from '../_shared/cors.ts';
+import { drawFromDeck } from '../_shared/deck.ts';
 import { logEvent } from '../_shared/events.ts';
 
 serve(async (req) => {
@@ -36,10 +36,11 @@ serve(async (req) => {
     await supabaseAdmin.from('pending_targets').insert(
       order.map((p, i) => ({ game_id: gameId, player_id: p.id, is_current_turn: i === 0, order_index: i }))
     );
+
+    const eventId = await logEvent(gameId, 'general_store_played', { actorSeat: me.seat_position });
     await supabaseAdmin.from('games').update({
-      pending_type: 'general_store', pending_initiator_id: me.id, pending_expires_at: new Date(Date.now() + 20_000).toISOString(),
+      pending_type: 'general_store', pending_initiator_id: me.id, pending_expires_at: new Date(Date.now() + 20_000).toISOString(), pending_event_id: eventId,
     }).eq('id', gameId);
-    await logEvent(gameId, 'general_store_played', { actorSeat: me.seat_position });
 
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {

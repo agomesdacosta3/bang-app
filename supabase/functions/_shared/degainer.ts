@@ -3,7 +3,7 @@ import { drawFromDeck, DeckCard } from './deck.ts';
 import { getCharacter } from './characters.ts';
 import { logEvent } from './events.ts';
 
-export async function degainer(gameId: string, playerId?: string, isFavorable?: (card: DeckCard) => boolean): Promise<DeckCard> {
+export async function degainer(gameId: string, playerId?: string, isFavorable?: (card: DeckCard) => boolean, threadId?: string): Promise<DeckCard> {
   const character = playerId ? await getCharacter(playerId) : null;
   let actorSeat: number | undefined;
   if (playerId) {
@@ -19,12 +19,12 @@ export async function degainer(gameId: string, playerId?: string, isFavorable?: 
     ]);
     const chosen = isFavorable ? (isFavorable(a) ? a : (isFavorable(b) ? b : a)) : a;
     const other = chosen === a ? b : a;
-    await logEvent(gameId, 'degainer_draw', { actorSeat, drawnSuit: chosen.suit, drawnValue: chosen.value, drawnSuit2: other.suit, drawnValue2: other.value });
+    await logEvent(gameId, 'degainer_draw', { actorSeat, drawnSuit: chosen.suit, drawnValue: chosen.value, drawnSuit2: other.suit, drawnValue2: other.value, threadId });
     return chosen;
   }
 
   const [drawn] = await drawFromDeck(gameId, 1);
   await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: drawn.type, suit: drawn.suit, value: drawn.value });
-  await logEvent(gameId, 'degainer_draw', { actorSeat, drawnSuit: drawn.suit, drawnValue: drawn.value });
+  await logEvent(gameId, 'degainer_draw', { actorSeat, drawnSuit: drawn.suit, drawnValue: drawn.value, threadId });
   return drawn;
 }

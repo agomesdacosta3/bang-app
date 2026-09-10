@@ -32,6 +32,17 @@ export const roleLabels: Record<string, string> = {
   sheriff: 'Shérif', deputy: 'Adjoint', outlaw: 'Hors-la-loi', renegade: 'Renégat',
 };
 
+export const roleObjectives: Record<string, string> = {
+  sheriff: 'Éliminer tous les Hors-la-loi et le Renégat.',
+  deputy: 'Protéger le Shérif jusqu\u2019à la victoire.',
+  outlaw: 'Éliminer le Shérif.',
+  renegade: 'Être le dernier survivant en jeu.',
+};
+
+export const winnerTeamLabels: Record<string, string> = {
+  sheriff: 'Shérif', outlaws: 'Hors-la-loi', renegade: 'Renégat',
+};
+
 export const suitLabels: Record<string, string> = {
   hearts: 'Cœur', diamonds: 'Carreau', clubs: 'Trèfle', spades: 'Pique',
 };
@@ -41,6 +52,25 @@ export const characterLabels: Record<string, string> = {
   jesse_jones: 'Jesse Jones', jourdonnais: 'Jourdonnais', kit_carlson: 'Kit Carlson', lucky_duke: 'Lucky Duke',
   paul_regret: 'Paul Regret', pedro_ramirez: 'Pedro Ramirez', rose_doolan: 'Rose Doolan', sid_ketchum: 'Sid Ketchum',
   slab_the_killer: 'Slab le Flingueur', suzy_lafayette: 'Suzy Lafayette', vulture_sam: 'Sam le Vautour', willy_the_kid: 'Willy le Kid',
+};
+
+export const characterDescriptions: Record<string, string> = {
+  bart_cassidy: 'Pioche 1 carte à chaque perte de vie.',
+  black_jack: 'Pioche une 3ᵉ carte si la 2ᵉ est Cœur ou Carreau.',
+  calamity_janet: 'Bang! et Raté! sont interchangeables.',
+  el_gringo: 'Vole une carte à qui lui inflige des dégâts.',
+  jesse_jones: 'Peut piocher dans la main d\u2019un adversaire.',
+  jourdonnais: 'Compte comme s\u2019il avait toujours une Planque.',
+  kit_carlson: 'Regarde 3 cartes de la pioche, en garde 2.',
+  lucky_duke: 'Dégaine avec 2 cartes, garde la meilleure.',
+  paul_regret: 'Compte comme s\u2019il avait toujours un Mustang.',
+  pedro_ramirez: 'Peut piocher depuis la défausse.',
+  rose_doolan: 'Compte comme si elle avait toujours une Lunette.',
+  sid_ketchum: 'Défausse 2 cartes à tout moment pour +1 PV.',
+  slab_the_killer: 'Ses cibles doivent jouer 2 Raté! pour l\u2019annuler.',
+  suzy_lafayette: 'Pioche 1 carte dès que sa main est vide.',
+  vulture_sam: 'Récupère les cartes d\u2019un joueur éliminé.',
+  willy_the_kid: 'Peut jouer autant de Bang! qu\u2019il veut.',
 };
 
 export function renderPips(current: number, max: number): string {

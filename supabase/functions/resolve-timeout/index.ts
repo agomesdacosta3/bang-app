@@ -14,6 +14,7 @@ serve(async (req) => {
     if (!game?.pending_type || !game.pending_expires_at || new Date(game.pending_expires_at) > new Date()) {
       return new Response(JSON.stringify({ ok: true, resolved: false }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
     }
+    const threadId = game.pending_event_id ?? undefined;
 
     if (game.pending_type === 'general_store') {
       const { data: current } = await supabaseAdmin.from('pending_targets').select('player_id').eq('game_id', gameId).eq('is_current_turn', true).single();
@@ -35,7 +36,7 @@ serve(async (req) => {
           await supabaseAdmin.from('cards_in_play').delete().eq('id', pick.id);
         }
         await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: pick.card_type, suit: pick.suit, value: pick.value });
-        await logEvent(gameId, 'card_discarded_forced', { actorSeat: targetPlayer!.seat_position, cardType: pick.card_type });
+        await logEvent(gameId, 'card_discarded_forced', { actorSeat: targetPlayer!.seat_position, cardType: pick.card_type, threadId });
       }
       await clearPending(gameId);
     } else {
@@ -46,7 +47,7 @@ serve(async (req) => {
           const { data: opponent } = await supabaseAdmin.from('pending_targets').select('player_id').eq('game_id', gameId).neq('player_id', row.player_id).maybeSingle();
           causedBy = opponent?.player_id ?? causedBy;
         }
-        await applyDamage(gameId, row.player_id, 1, causedBy);
+        await applyDamage(gameId, row.player_id, { causedByPlayerId: causedBy, threadId });
       }
       await clearPending(gameId);
     }

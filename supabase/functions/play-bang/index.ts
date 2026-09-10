@@ -49,10 +49,10 @@ serve(async (req) => {
     await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: searchType, suit: bangCard.suit, value: bangCard.value });
     await supabaseAdmin.from('players').update({ has_played_bang_this_turn: true }).eq('id', me.id);
 
+    const eventId = await logEvent(gameId, 'bang_played', { actorSeat: me.seat_position, targetSeat: target.seat_position });
     const cancelsNeeded = character === 'slab_the_killer' ? 2 : 1;
-    await startPending(gameId, me.id, 'bang_response', [{ playerId: target.id, isCurrentTurn: true, cancelsNeeded }]);
-    await logEvent(gameId, 'bang_played', { actorSeat: me.seat_position, targetSeat: target.seat_position });
-    await checkSuzyLafayette(gameId, me.id);
+    await startPending(gameId, me.id, 'bang_response', [{ playerId: target.id, isCurrentTurn: true, cancelsNeeded }], 20000, eventId);
+    await checkSuzyLafayette(gameId, me.id, eventId);
 
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {

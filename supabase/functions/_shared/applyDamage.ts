@@ -4,15 +4,18 @@ import { logEvent } from './events.ts';
 import { getCharacter, checkSuzyLafayette } from './characters.ts';
 import { drawFromDeck } from './deck.ts';
 
-export async function applyDamage(gameId: string, playerId: string, amount = 1, causedByPlayerId?: string) {
+export async function applyDamage(gameId: string, playerId: string, options: {
+  amount?: number; causedByPlayerId?: string; threadId?: string;
+} = {}) {
+  const { amount = 1, causedByPlayerId, threadId } = options;
+
   const { data: player } = await supabaseAdmin.from('players').select('life_points, seat_position').eq('id', playerId).single();
   const newLife = player!.life_points - amount;
   const eliminated = newLife <= 0;
   await supabaseAdmin.from('players').update({ life_points: Math.max(newLife, 0), is_alive: !eliminated }).eq('id', playerId);
 
-  await logEvent(gameId, 'damage_taken', { actorSeat: player!.seat_position, amount });
+  await logEvent(gameId, 'damage_taken', { actorSeat: player!.seat_position, amount, threadId });
 
-  // El Gringo : vole une carte au responsable de la perte de vie, une fois par point perdu (jamais pour la Dynamite)
   if (causedByPlayerId && causedByPlayerId !== playerId) {
     const victimCharacter = await getCharacter(playerId);
     if (victimCharacter === 'el_gringo') {
@@ -26,8 +29,8 @@ export async function applyDamage(gameId: string, playerId: string, amount = 1, 
       }
       if (stolenCount > 0) {
         const { data: attacker } = await supabaseAdmin.from('players').select('seat_position').eq('id', causedByPlayerId).single();
-        await logEvent(gameId, 'el_gringo_steal', { actorSeat: player!.seat_position, targetSeat: attacker?.seat_position, amount: stolenCount });
-        await checkSuzyLafayette(gameId, causedByPlayerId);
+        await logEvent(gameId, 'el_gringo_steal', { actorSeat: player!.seat_position, targetSeat: attacker?.seat_position, amount: stolenCount, threadId });
+        await checkSuzyLafayette(gameId, causedByPlayerId, threadId);
       }
     }
   }
@@ -37,7 +40,7 @@ export async function applyDamage(gameId: string, playerId: string, amount = 1, 
     if (character === 'bart_cassidy') {
       const [card] = await drawFromDeck(gameId, 1);
       await supabaseAdmin.from('hand_cards').insert({ player_id: playerId, card_type: card.type, suit: card.suit, value: card.value });
-      await logEvent(gameId, 'bart_cassidy_draw', { actorSeat: player!.seat_position });
+      await logEvent(gameId, 'bart_cassidy_draw', { actorSeat: player!.seat_position, threadId });
     }
   }
 
@@ -57,7 +60,7 @@ export async function applyDamage(gameId: string, playerId: string, amount = 1, 
       if (allTaken.length) {
         await supabaseAdmin.from('hand_cards').insert(allTaken.map(c => ({ player_id: sam.player_id, card_type: c.card_type, suit: c.suit, value: c.value })));
         const { data: samPlayer } = await supabaseAdmin.from('players').select('seat_position').eq('id', sam.player_id).single();
-        await logEvent(gameId, 'vulture_sam_loot', { actorSeat: samPlayer?.seat_position, targetSeat: player!.seat_position, amount: allTaken.length });
+        await logEvent(gameId, 'vulture_sam_loot', { actorSeat: samPlayer?.seat_position, targetSeat: player!.seat_position, amount: allTaken.length, threadId });
       }
       await supabaseAdmin.from('hand_cards').delete().eq('player_id', playerId);
       await supabaseAdmin.from('cards_in_play').delete().eq('player_id', playerId);
@@ -69,7 +72,7 @@ export async function applyDamage(gameId: string, playerId: string, amount = 1, 
       }
     }
 
-    await logEvent(gameId, 'player_eliminated', { actorSeat: player!.seat_position });
+    await logEvent(gameId, 'player_eliminated', { actorSeat: player!.seat_position, threadId });
     await checkVictory(gameId, playerId);
   }
 }
