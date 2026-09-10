@@ -1,13 +1,17 @@
 import { useEffect, useState } from 'react';
-import { SafeAreaView, ActivityIndicator, StyleSheet, Text, Alert } from 'react-native';
+import { SafeAreaView, ActivityIndicator, StyleSheet, Alert } from 'react-native';
+import { useFonts, Rye_400Regular } from '@expo-google-fonts/rye';
+import { Arvo_400Regular, Arvo_700Bold } from '@expo-google-fonts/arvo';
 import { supabase } from './lib/supabase';
 import HomeScreen from './screens/HomeScreen';
 import LobbyScreen from './screens/LobbyScreen';
 import GameScreen from './screens/GameScreen';
+import { colors } from './theme';
 
 type GameState = { gameId: string; playerId: string; joinCode?: string };
 
 export default function App() {
+  const [fontsLoaded] = useFonts({ Rye_400Regular, Arvo_400Regular, Arvo_700Bold });
   const [ready, setReady] = useState(false);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [gameStarted, setGameStarted] = useState(false);
@@ -23,8 +27,8 @@ export default function App() {
     })();
   }, []);
 
-  if (!ready) {
-    return <SafeAreaView style={styles.container}><ActivityIndicator size="large" /></SafeAreaView>;
+  if (!fontsLoaded || !ready) {
+    return <SafeAreaView style={styles.container}><ActivityIndicator size="large" color={colors.leather} /></SafeAreaView>;
   }
 
   if (gameState && gameStarted) {
@@ -51,6 +55,6 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  flexFill: { flex: 1 },
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.parchment },
+  flexFill: { flex: 1, backgroundColor: colors.parchment },
 });

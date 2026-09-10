@@ -26,7 +26,9 @@ if (!JOIN_CODE) {
 //                une seule fois, à son prochain tour, avant de reprendre un comportement normal
 //                (targetSeat requis pour 'bang'/'duel', ignoré pour 'indians')
 
-const RIG = { 0: {}, 1: { character: 'sid_ketchum', hand: ['bang', 'bang', 'bang', 'bang'] } };
+const RIG = {
+
+};
 
 const CHARACTER_BASE_LIFE = { paul_regret: 3, el_gringo: 3 };
 const SUITS = ['hearts', 'diamonds', 'clubs', 'spades'];

@@ -1,47 +1,23 @@
 import { useEffect, useState, useRef } from 'react';
-import { View, Text, Button, StyleSheet, Alert, Modal, Pressable, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Alert, Modal, Pressable, ScrollView } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { callFunction } from '../lib/functions';
 import { computeDistance, SeatedPlayer } from '../lib/distance';
 import { getWeaponRange, WEAPON_TYPES } from '../lib/weapons';
+import { colors, fonts, cardLabels, equipmentTags, roleLabels, suitLabels, characterLabels, renderPips } from '../theme';
+import WoodButton from '../components/WoodButton';
+import PlayingCard from '../components/PlayingCard';
 
 type Game = {
   id: string; status: string; current_player_id: string | null; turn_phase: string | null;
   pending_type: string | null; pending_initiator_id: string | null; pending_expires_at: string | null; winner_team: string | null;
 };
 type Player = SeatedPlayer & { is_sheriff: boolean; life_points: number; max_life_points: number; has_played_bang_this_turn: boolean };
-type HandCard = { id: string; card_type: string };
+type HandCard = { id: string; card_type: string; suit: string; value: number };
 type Equipment = { player_id: string; card_type: string };
 type StoreCard = { id: string; card_type: string; suit: string; value: number };
 type DiscardCard = { id: string; card_type: string; suit: string; value: number };
-type PendingRow = { is_current_turn: boolean; barrel_tries_used: number; cancels_needed: number; cancels_achieved: number };
 type GameEvent = { id: string; event_type: string; actor_seat: number | null; target_seat: number | null; amount: number | null; card_type: string | null };
-
-const CARD_LABELS: Record<string, string> = {
-  bang: 'Bang!', missed: 'Raté!', beer: 'Bière', duel: 'Duel', indians: 'Indiens!',
-  prison: 'Prison', dynamite: 'Dynamite', barrel: 'Planque',
-  saloon: 'Saloon', stagecoach: 'Diligence', wells_fargo: 'Convoi', mustang: 'Mustang', scope: 'Lunette',
-  panic: 'Braquage!', cat_balou: 'Coup de foudre', gatling: 'Gatling', general_store: 'Magasin',
-  schofield: 'Schofield', remington: 'Remington', carbine: 'Carabine', winchester: 'Winchester', volcanic: 'Volcanic',
-};
-const EQUIPMENT_TAGS: Record<string, string> = {
-  prison: '🔒', dynamite: '💣', barrel: '🛢️', mustang: '🐎', scope: '🔭',
-  schofield: '🔫', remington: '🔫', carbine: '🔫', winchester: '🔫', volcanic: '🌋',
-};
-const ROLE_LABELS: Record<string, string> = { sheriff: 'Shérif', deputy: 'Adjoint', outlaw: 'Hors-la-loi', renegade: 'Renégat' };
-const SUIT_LABELS: Record<string, string> = { hearts: 'Cœur', diamonds: 'Carreau', clubs: 'Trèfle', spades: 'Pique' };
-const SUIT_SYMBOLS: Record<string, string> = { hearts: '♥', diamonds: '♦', clubs: '♣', spades: '♠' };
-const VALUE_LABELS: Record<number, string> = { 11: 'J', 12: 'Q', 13: 'K', 14: 'A' };
-const CHARACTER_LABELS: Record<string, string> = {
-  bart_cassidy: 'Bart Cassidy', black_jack: 'Black Jack', calamity_janet: 'Calamity Janet', el_gringo: 'El Gringo',
-  jesse_jones: 'Jesse Jones', jourdonnais: 'Jourdonnais', kit_carlson: 'Kit Carlson', lucky_duke: 'Lucky Duke',
-  paul_regret: 'Paul Regret', pedro_ramirez: 'Pedro Ramirez', rose_doolan: 'Rose Doolan', sid_ketchum: 'Sid Ketchum',
-  slab_the_killer: 'Slab le Flingueur', suzy_lafayette: 'Suzy Lafayette', vulture_sam: 'Sam le Vautour', willy_the_kid: 'Willy le Kid',
-};
-
-function formatCardFace(suit: string, value: number) {
-  return `${VALUE_LABELS[value] ?? value}${SUIT_SYMBOLS[suit] ?? suit}`;
-}
 
 function describeOutcome(recentEvents: GameEvent[]): string {
   const latest = recentEvents[0];
@@ -52,13 +28,25 @@ function describeOutcome(recentEvents: GameEvent[]): string {
     case 'missed_played': return `Siège ${latest.actor_seat} a esquivé avec Raté!`;
     case 'barrel_used': return `Siège ${latest.actor_seat} a esquivé avec la Planque !`;
     case 'indians_defended': return `Siège ${latest.actor_seat} a défendu avec Bang! contre Indiens!`;
-    case 'store_card_taken': return `Siège ${latest.actor_seat} a récupéré : ${CARD_LABELS[latest.card_type ?? ''] ?? latest.card_type}`;
-    case 'card_discarded_forced': return `Siège ${latest.actor_seat} a défaussé : ${CARD_LABELS[latest.card_type ?? ''] ?? latest.card_type} (Coup de foudre)`;
-    case 'beer_saved_from_death': return `Siège ${latest.actor_seat} a bu une Bière in extremis et reste à 1 PV !`;
+    case 'store_card_taken': return `Siège ${latest.actor_seat} a récupéré : ${cardLabels[latest.card_type ?? ''] ?? latest.card_type}`;
+    case 'card_discarded_forced': return `Siège ${latest.actor_seat} a défaussé : ${cardLabels[latest.card_type ?? ''] ?? latest.card_type} (Coup de foudre)`;
     case 'el_gringo_steal': return `Siège ${latest.actor_seat} vole une carte à Siège ${latest.target_seat} (El Gringo)`;
     case 'vulture_sam_loot': return `Siège ${latest.actor_seat} récupère ${latest.amount} carte(s) de Siège ${latest.target_seat} (Sam le Vautour)`;
+    case 'beer_saved_from_death': return `Siège ${latest.actor_seat} a bu une Bière in extremis et reste à 1 PV !`;
     default: return 'Résolu.';
   }
+}
+
+function NoticeBox({ title, timer, children }: { title: string; timer?: string; children: React.ReactNode }) {
+  return (
+    <View style={styles.notice}>
+      <View style={styles.noticeHeader}>
+        <Text style={styles.noticeTitle}>{title}</Text>
+        {!!timer && <Text style={styles.noticeTimer}>{timer}</Text>}
+      </View>
+      {children}
+    </View>
+  );
 }
 
 export default function GameScreen({ gameId, playerId, onLeave }: { gameId: string; playerId: string; onLeave: () => void }) {
@@ -68,7 +56,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [rolesMap, setRolesMap] = useState<Record<string, string>>({});
   const [charactersMap, setCharactersMap] = useState<Record<string, string>>({});
-  const [myPendingRow, setMyPendingRow] = useState<PendingRow | null>(null);
+  const [myPendingRow, setMyPendingRow] = useState<{ is_current_turn: boolean; barrel_tries_used: number; cancels_needed: number; cancels_achieved: number } | null>(null);
   const [allPendingTargets, setAllPendingTargets] = useState<{ player_id: string; is_current_turn: boolean }[]>([]);
   const [storeCards, setStoreCards] = useState<StoreCard[]>([]);
   const [discardTop, setDiscardTop] = useState<DiscardCard[]>([]);
@@ -128,7 +116,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   async function loadAll() {
     const { data: g } = await supabase.from('games').select('*').eq('id', gameId).single();
     const { data: p } = await supabase.from('players').select('*').eq('game_id', gameId).order('seat_position');
-    const { data: h } = await supabase.from('hand_cards').select('id, card_type').eq('player_id', playerId);
+    const { data: h } = await supabase.from('hand_cards').select('id, card_type, suit, value').eq('player_id', playerId);
     const { data: pending } = await supabase.from('pending_targets').select('is_current_turn, barrel_tries_used, cancels_needed, cancels_achieved').eq('game_id', gameId).eq('player_id', playerId).maybeSingle();
     const { data: allPt } = await supabase.from('pending_targets').select('player_id, is_current_turn').eq('game_id', gameId);
     const { data: eq } = p?.length ? await supabase.from('cards_in_play').select('player_id, card_type').in('player_id', p.map(pl => pl.id)) : { data: [] };
@@ -302,7 +290,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     setActionLoading(true);
     try {
       const result = await callFunction('play-panic', { gameId, targetPlayerId: targetId, source, cardType });
-      Alert.alert('Braquage!', `Vous avez récupéré : ${CARD_LABELS[result?.stolenCardType] ?? result?.stolenCardType ?? 'une carte'}`);
+      Alert.alert('Braquage!', `Vous avez récupéré : ${cardLabels[result?.stolenCardType] ?? result?.stolenCardType ?? 'une carte'}`);
     } catch (err: any) {
       Alert.alert('Erreur', err.message);
     } finally {
@@ -315,7 +303,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     setActionLoading(true);
     try {
       const result = await callFunction('respond-bang', { gameId, action: 'try_barrel' });
-      if (result?.barrelWorked === false) Alert.alert('Planque ratée', `Carte tirée : ${SUIT_LABELS[result.drawnSuit] ?? result.drawnSuit}. Choisissez une autre réponse.`);
+      if (result?.barrelWorked === false) Alert.alert('Planque ratée', `Carte tirée : ${suitLabels[result.drawnSuit] ?? result.drawnSuit}. Choisissez une autre réponse.`);
     } catch (err: any) {
       Alert.alert('Erreur', err.message);
     } finally {
@@ -327,7 +315,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     setActionLoading(true);
     try {
       const result = await callFunction('respond-gatling', { gameId, action: 'try_barrel' });
-      if (result?.barrelWorked === false) Alert.alert('Planque ratée', `Carte tirée : ${SUIT_LABELS[result.drawnSuit] ?? result.drawnSuit}. Choisissez une autre réponse.`);
+      if (result?.barrelWorked === false) Alert.alert('Planque ratée', `Carte tirée : ${suitLabels[result.drawnSuit] ?? result.drawnSuit}. Choisissez une autre réponse.`);
     } catch (err: any) {
       Alert.alert('Erreur', err.message);
     } finally {
@@ -373,15 +361,17 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     });
   }
 
-  if (!game || !me) return <View style={styles.centerContainer}><Text>Chargement...</Text></View>;
+  if (!game || !me) {
+    return <View style={styles.centerContainer}><Text style={styles.bodyText}>Chargement...</Text></View>;
+  }
 
   if (game.status === 'finished') {
     return (
       <View style={styles.centerContainer}>
         <Text style={styles.title}>Partie terminée</Text>
-        <Text style={styles.subtitle}>Camp vainqueur : {game.winner_team}</Text>
-        <View style={styles.spacer} />
-        <Button title="Retour à l'accueil" onPress={onLeave} />
+        <Text style={styles.bodyText}>Camp vainqueur : {game.winner_team}</Text>
+        <View style={{ height: 16 }} />
+        <WoodButton title="Retour à l'accueil" onPress={onLeave} variant="primary" />
       </View>
     );
   }
@@ -398,10 +388,10 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const hasMissed = hand.some(c => c.card_type === 'missed');
   const hasBang = hand.some(c => c.card_type === 'bang');
   const hasBeer = hand.some(c => c.card_type === 'beer');
-  const canDrinkBeerToSurvive = hasBeer && me.life_points <= 1 && aliveCount > 2;
   const hasBarrelInPlay = myEquipmentTypes.includes('barrel');
   const maxBarrelTries = (isJourdonnais ? 1 : 0) + (hasBarrelInPlay ? 1 : 0);
   const canTryBarrel = maxBarrelTries > 0 && (myPendingRow?.barrel_tries_used ?? 0) < maxBarrelTries;
+  const canDrinkBeerToSurvive = hasBeer && me.life_points <= 1 && aliveCount > 2;
 
   const mustangIds = new Set(equipment.filter(e => e.card_type === 'mustang').map(e => e.player_id));
   const scopeIds = new Set(equipment.filter(e => e.card_type === 'scope').map(e => e.player_id));
@@ -412,7 +402,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const equipmentFlags = { mustangIds, scopeIds };
   const myWeaponRange = getWeaponRange(myEquipmentTypes);
   const myWeaponType = myEquipmentTypes.find(t => WEAPON_TYPES.includes(t));
-  const myWeaponName = myWeaponType ? (CARD_LABELS[myWeaponType] ?? myWeaponType) : 'Colt .45';
+  const myWeaponName = myWeaponType ? (cardLabels[myWeaponType] ?? myWeaponType) : 'Colt .45';
   const hasVolcanic = myEquipmentTypes.includes('volcanic');
 
   const bangTargets = players.filter(p => p.is_alive && p.id !== playerId && computeDistance(players, playerId, p.id, equipmentFlags) <= myWeaponRange);
@@ -426,7 +416,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
 
   const needsDegainer = isMyTurn && !hasPending && game.turn_phase === 'draw' && myEquipmentTypes.some(t => t === 'dynamite' || t === 'prison');
   const canDraw = isMyTurn && !hasPending && game.turn_phase === 'draw' && !needsDegainer;
-  const canAct = isMyTurn && !hasPending && game.turn_phase === 'play' && !discarding;
+  const canAct = isMyTurn && !hasPending && game.turn_phase === 'play' && !discarding && !sidKetchumMode;
   const canPlayBang = canAct && bangTargets.length > 0 && (hasVolcanic || isWillyTheKid || !me.has_played_bang_this_turn);
   const canPlayBeer = canAct && aliveCount > 2 && me.life_points < me.max_life_points;
   const canPlayDuel = canAct && duelTargets.length > 0;
@@ -453,240 +443,274 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const isMyStoreTurn = myPendingRow?.is_current_turn && game.pending_type === 'general_store';
   const waitingOnOthers = hasPending && !mustRespondToBang && !mustRespondToGatling && !mustRespondToDuel && !mustRespondToIndians && !mustChooseCatBalouDiscard && !isMyStoreTurn;
 
-  const timerLabel = secondsLeft !== null ? `⏱ ${secondsLeft}s` : '';
+  const timerLabel = secondsLeft !== null ? `⏱ ${secondsLeft}s` : undefined;
 
   return (
     <ScrollView style={styles.flexFill} contentContainerStyle={styles.container}>
-      <Text style={styles.title}>Vie : {me.life_points}/{me.max_life_points}{me.is_sheriff ? ' 🎖️' : ''}</Text>
-      <Text style={styles.subtitle}>Votre rôle : {ROLE_LABELS[myRole] ?? '...'}</Text>
-      <Text style={styles.subtitle}>Personnage : {CHARACTER_LABELS[myCharacter] ?? '...'}</Text>
-      <Text style={styles.hint}>Arme équipée : {myWeaponName} (portée {myWeaponRange})</Text>
-      <Text style={styles.hint}>Dernière synchro : {lastSync || '—'}</Text>
-      <Text style={styles.hint}>Canal : {channelStatus}</Text>
+      <View style={styles.plaque}>
+        <View style={styles.plaqueRoleRow}>
+          {me.is_sheriff && <Text style={styles.starIcon}>★</Text>}
+          <Text style={styles.plaqueRole}>{roleLabels[myRole] ?? '...'}</Text>
+          <Text style={styles.plaquePips}>{renderPips(me.life_points, me.max_life_points)}</Text>
+        </View>
+        <Text style={styles.plaqueSub}>{characterLabels[myCharacter] ?? '...'} · {myWeaponName} (portée {myWeaponRange})</Text>
+      </View>
+      <Text style={styles.debugHint}>Dernière synchro : {lastSync || '—'} · Canal : {channelStatus}</Text>
 
       {mustRespondToBang && (
-        <View style={styles.pendingBox}>
-          <Text style={styles.pendingTitle}>Vous êtes visé par un Bang! Répondez : {timerLabel}</Text>
-          {myPendingRow.cancels_needed > 1 && (
-            <Text style={styles.subtitle}>Annulations : {myPendingRow.cancels_achieved}/{myPendingRow.cancels_needed} (Slab le Flingueur)</Text>
+        <NoticeBox title="Avis" timer={timerLabel}>
+          <Text style={styles.noticeBody}>Vous êtes visé par un Bang! Répondez :</Text>
+          {myPendingRow!.cancels_needed > 1 && (
+            <Text style={styles.noticeMeta}>Annulations : {myPendingRow!.cancels_achieved}/{myPendingRow!.cancels_needed} (Slab le Flingueur)</Text>
           )}
-          {hasMissed && <Button title="Jouer Raté!" onPress={() => handleRespond('missed')} disabled={actionLoading} />}
-          {isCalamityJanet && hasBang && <Button title="Jouer Bang! comme Raté!" onPress={() => handleRespond('missed', 'bang')} disabled={actionLoading} />}
-          {canTryBarrel && <Button title="Essayer la Planque" onPress={handleTryBarrel} disabled={actionLoading} />}
-          {canDrinkBeerToSurvive && <Button title="Boire une Bière (survivre)" onPress={() => handleRespond('drink_beer')} disabled={actionLoading} />}
-          <View style={styles.spacer} />
-          <Button title="Encaisser les dégâts" color="#a33" onPress={() => handleRespond('accept_damage')} disabled={actionLoading} />
-        </View>
+          {hasMissed && <WoodButton title="Jouer Raté!" onPress={() => handleRespond('missed')} disabled={actionLoading} style={styles.noticeBtn} />}
+          {isCalamityJanet && hasBang && <WoodButton title="Jouer Bang! comme Raté!" onPress={() => handleRespond('missed', 'bang')} disabled={actionLoading} style={styles.noticeBtn} />}
+          {canTryBarrel && <WoodButton title="Essayer la Planque" onPress={handleTryBarrel} disabled={actionLoading} style={styles.noticeBtn} />}
+          {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => handleRespond('drink_beer')} disabled={actionLoading} variant="safe" style={styles.noticeBtn} />}
+          <WoodButton title="Encaisser les dégâts" onPress={() => handleRespond('accept_damage')} disabled={actionLoading} variant="primary" style={styles.noticeBtn} />
+        </NoticeBox>
       )}
 
       {mustRespondToGatling && (
-        <View style={styles.pendingBox}>
-          <Text style={styles.pendingTitle}>Gatling ! Répondez : {timerLabel}</Text>
-          {hasMissed && <Button title="Jouer Raté!" onPress={() => handleRespondGatling('missed')} disabled={actionLoading} />}
-          {isCalamityJanet && hasBang && <Button title="Jouer Bang! comme Raté!" onPress={() => handleRespondGatling('missed', 'bang')} disabled={actionLoading} />}
-          {canTryBarrel && <Button title="Essayer la Planque" onPress={handleTryBarrelGatling} disabled={actionLoading} />}
-          {canDrinkBeerToSurvive && <Button title="Boire une Bière (survivre)" onPress={() => handleRespondGatling('drink_beer')} disabled={actionLoading} />}
-          <View style={styles.spacer} />
-          <Button title="Encaisser les dégâts" color="#a33" onPress={() => handleRespondGatling('accept_damage')} disabled={actionLoading} />
-        </View>
+        <NoticeBox title="Avis" timer={timerLabel}>
+          <Text style={styles.noticeBody}>Gatling ! Répondez :</Text>
+          {hasMissed && <WoodButton title="Jouer Raté!" onPress={() => handleRespondGatling('missed')} disabled={actionLoading} style={styles.noticeBtn} />}
+          {isCalamityJanet && hasBang && <WoodButton title="Jouer Bang! comme Raté!" onPress={() => handleRespondGatling('missed', 'bang')} disabled={actionLoading} style={styles.noticeBtn} />}
+          {canTryBarrel && <WoodButton title="Essayer la Planque" onPress={handleTryBarrelGatling} disabled={actionLoading} style={styles.noticeBtn} />}
+          {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => handleRespondGatling('drink_beer')} disabled={actionLoading} variant="safe" style={styles.noticeBtn} />}
+          <WoodButton title="Encaisser les dégâts" onPress={() => handleRespondGatling('accept_damage')} disabled={actionLoading} variant="primary" style={styles.noticeBtn} />
+        </NoticeBox>
       )}
 
       {mustRespondToDuel && (
-        <View style={styles.pendingBox}>
-          <Text style={styles.pendingTitle}>Duel ! Continuez ou encaissez : {timerLabel}</Text>
-          {hasBang && <Button title="Jouer Bang!" onPress={() => handleRespondDuel('discard_bang')} disabled={actionLoading} />}
-          {isCalamityJanet && hasMissed && <Button title="Jouer Raté! comme Bang!" onPress={() => handleRespondDuel('discard_bang', 'missed')} disabled={actionLoading} />}
-          {canDrinkBeerToSurvive && <Button title="Boire une Bière (survivre)" onPress={() => handleRespondDuel('drink_beer')} disabled={actionLoading} />}
-          <View style={styles.spacer} />
-          <Button title="Encaisser les dégâts" color="#a33" onPress={() => handleRespondDuel('accept_damage')} disabled={actionLoading} />
-        </View>
+        <NoticeBox title="Avis" timer={timerLabel}>
+          <Text style={styles.noticeBody}>Duel ! Continuez ou encaissez :</Text>
+          {hasBang && <WoodButton title="Jouer Bang!" onPress={() => handleRespondDuel('discard_bang')} disabled={actionLoading} style={styles.noticeBtn} />}
+          {isCalamityJanet && hasMissed && <WoodButton title="Jouer Raté! comme Bang!" onPress={() => handleRespondDuel('discard_bang', 'missed')} disabled={actionLoading} style={styles.noticeBtn} />}
+          {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => handleRespondDuel('drink_beer')} disabled={actionLoading} variant="safe" style={styles.noticeBtn} />}
+          <WoodButton title="Encaisser les dégâts" onPress={() => handleRespondDuel('accept_damage')} disabled={actionLoading} variant="primary" style={styles.noticeBtn} />
+        </NoticeBox>
       )}
 
       {mustRespondToIndians && (
-        <View style={styles.pendingBox}>
-          <Text style={styles.pendingTitle}>Indiens! Défendez-vous ou encaissez : {timerLabel}</Text>
-          {hasBang && <Button title="Jouer Bang!" onPress={() => handleRespondIndians('discard_bang')} disabled={actionLoading} />}
-          {isCalamityJanet && hasMissed && <Button title="Jouer Raté! comme Bang!" onPress={() => handleRespondIndians('discard_bang', 'missed')} disabled={actionLoading} />}
-          {canDrinkBeerToSurvive && <Button title="Boire une Bière (survivre)" onPress={() => handleRespondIndians('drink_beer')} disabled={actionLoading} />}
-          <View style={styles.spacer} />
-          <Button title="Encaisser les dégâts" color="#a33" onPress={() => handleRespondIndians('accept_damage')} disabled={actionLoading} />
-        </View>
+        <NoticeBox title="Avis" timer={timerLabel}>
+          <Text style={styles.noticeBody}>Indiens! Défendez-vous ou encaissez :</Text>
+          {hasBang && <WoodButton title="Jouer Bang!" onPress={() => handleRespondIndians('discard_bang')} disabled={actionLoading} style={styles.noticeBtn} />}
+          {isCalamityJanet && hasMissed && <WoodButton title="Jouer Raté! comme Bang!" onPress={() => handleRespondIndians('discard_bang', 'missed')} disabled={actionLoading} style={styles.noticeBtn} />}
+          {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => handleRespondIndians('drink_beer')} disabled={actionLoading} variant="safe" style={styles.noticeBtn} />}
+          <WoodButton title="Encaisser les dégâts" onPress={() => handleRespondIndians('accept_damage')} disabled={actionLoading} variant="primary" style={styles.noticeBtn} />
+        </NoticeBox>
       )}
 
       {mustChooseCatBalouDiscard && (
-        <View style={styles.pendingBox}>
-          <Text style={styles.pendingTitle}>Coup de foudre ! Choisissez une carte à défausser (main ou en jeu) : {timerLabel}</Text>
-          {hand.map(c => <Button key={c.id} title={`${CARD_LABELS[c.card_type] ?? c.card_type} (main)`} onPress={() => handleRespondCatBalouHand(c.id)} disabled={actionLoading} />)}
-          {myEquipmentTypes.map(t => <Button key={t} title={`${CARD_LABELS[t] ?? t} (en jeu)`} onPress={() => handleRespondCatBalouEquip(t)} disabled={actionLoading} />)}
-        </View>
+        <NoticeBox title="Avis" timer={timerLabel}>
+          <Text style={styles.noticeBody}>Coup de foudre ! Choisissez une carte à défausser :</Text>
+          {hand.map(c => (
+            <WoodButton key={c.id} title={`${cardLabels[c.card_type] ?? c.card_type} (main)`} onPress={() => handleRespondCatBalouHand(c.id)} disabled={actionLoading} style={styles.noticeBtn} />
+          ))}
+          {myEquipmentTypes.map(t => (
+            <WoodButton key={t} title={`${cardLabels[t] ?? t} (en jeu)`} onPress={() => handleRespondCatBalouEquip(t)} disabled={actionLoading} style={styles.noticeBtn} />
+          ))}
+        </NoticeBox>
       )}
 
       {game.pending_type === 'general_store' && (
-        <View style={styles.pendingBox}>
+        <NoticeBox title="Avis" timer={timerLabel}>
           {isMyStoreTurn ? (
             <>
-              <Text style={styles.pendingTitle}>Magasin — choisissez une carte : {timerLabel}</Text>
-              {storeCards.map(c => <Button key={c.id} title={CARD_LABELS[c.card_type] ?? c.card_type} onPress={() => handlePickStoreCard(c.id)} disabled={actionLoading} />)}
+              <Text style={styles.noticeBody}>Magasin — choisissez une carte :</Text>
+              {storeCards.map(c => (
+                <WoodButton key={c.id} title={cardLabels[c.card_type] ?? c.card_type} onPress={() => handlePickStoreCard(c.id)} disabled={actionLoading} style={styles.noticeBtn} />
+              ))}
             </>
           ) : (
-            <Text style={styles.pendingTitle}>{describePendingSituation()} {timerLabel}</Text>
+            <Text style={styles.noticeBody}>{describePendingSituation()}</Text>
           )}
-        </View>
+        </NoticeBox>
       )}
 
       {waitingOnOthers && (
-        <View style={styles.pendingBox}>
-          <Text style={styles.pendingTitle}>{amDead ? 'Vous êtes éliminé' : 'En attente de votre tour'} {timerLabel}</Text>
-          <Text style={styles.subtitle}>{describePendingSituation()}</Text>
-        </View>
+        <NoticeBox title={amDead ? 'Vous êtes éliminé' : 'En attente de votre tour'} timer={timerLabel}>
+          <Text style={styles.noticeBody}>{describePendingSituation()}</Text>
+        </NoticeBox>
       )}
 
       {!hasPending && !isMyTurn && (
-        <Text style={styles.subtitle}>
+        <Text style={styles.waitingText}>
           {amDead ? 'Vous êtes éliminé' : 'En attente de votre tour'} — c'est au siège {players.find(p => p.id === game.current_player_id)?.seat_position} de jouer
         </Text>
       )}
 
       <Text style={styles.sectionTitle}>Votre main</Text>
       {!discarding && !sidKetchumMode && (
-        <View>
+        <View style={styles.handRow}>
           {hand.length === 0 && <Text style={styles.hint}>Main vide</Text>}
-          {hand.map(item => (
-            <View key={item.id} style={styles.cardRow}>
-              <Text style={styles.cardLabel}>{CARD_LABELS[item.card_type] ?? item.card_type}</Text>
-              {item.card_type === 'bang' && canPlayBang && <Button title="Jouer" onPress={() => { setBangSourceType('bang'); setTargetPickerFor(item.id); }} disabled={actionLoading} />}
-              {item.card_type === 'missed' && isCalamityJanet && canPlayBang && <Button title="Jouer comme Bang!" onPress={() => { setBangSourceType('missed'); setTargetPickerFor(item.id); }} disabled={actionLoading} />}
-              {item.card_type === 'beer' && canPlayBeer && <Button title="Jouer" onPress={handlePlayBeer} disabled={actionLoading} />}
-              {item.card_type === 'duel' && canPlayDuel && <Button title="Jouer" onPress={() => setDuelTargetPickerFor(item.id)} disabled={actionLoading} />}
-              {item.card_type === 'indians' && canPlayIndians && <Button title="Jouer" onPress={handlePlayIndians} disabled={actionLoading} />}
-              {item.card_type === 'prison' && canPlayPrison && <Button title="Jouer" onPress={() => setPrisonTargetPickerFor(item.id)} disabled={actionLoading} />}
-              {item.card_type === 'dynamite' && canPlayDynamite && <Button title="Jouer" onPress={handlePlayDynamite} disabled={actionLoading} />}
-              {item.card_type === 'barrel' && canPlayBarrel && <Button title="Jouer" onPress={handlePlayBarrel} disabled={actionLoading} />}
-              {item.card_type === 'saloon' && canPlaySaloon && <Button title="Jouer" onPress={handlePlaySaloon} disabled={actionLoading} />}
-              {item.card_type === 'stagecoach' && canPlayStagecoach && <Button title="Jouer" onPress={handlePlayStagecoach} disabled={actionLoading} />}
-              {item.card_type === 'wells_fargo' && canPlayWellsFargo && <Button title="Jouer" onPress={handlePlayWellsFargo} disabled={actionLoading} />}
-              {item.card_type === 'mustang' && canPlayMustang && <Button title="Jouer" onPress={handlePlayMustang} disabled={actionLoading} />}
-              {item.card_type === 'scope' && canPlayScope && <Button title="Jouer" onPress={handlePlayScope} disabled={actionLoading} />}
-              {WEAPON_TYPES.includes(item.card_type) && canPlayWeapon && <Button title="Équiper" onPress={() => handlePlayWeapon(item.card_type)} disabled={actionLoading} />}
-              {item.card_type === 'panic' && canPlayPanic && <Button title="Jouer" onPress={() => handleOpenPanicPicker(item.id)} disabled={actionLoading} />}
-              {item.card_type === 'cat_balou' && canPlayCatBalou && <Button title="Jouer" onPress={() => handleOpenCatBalouPicker(item.id)} disabled={actionLoading} />}
-              {item.card_type === 'gatling' && canPlayGatling && <Button title="Jouer" onPress={handlePlayGatling} disabled={actionLoading} />}
-              {item.card_type === 'general_store' && canPlayGeneralStore && <Button title="Jouer" onPress={handlePlayGeneralStore} disabled={actionLoading} />}
-            </View>
-          ))}
+          {hand.map(item => {
+            let playable = false;
+            let onPress: (() => void) | undefined;
+            if (item.card_type === 'bang' && canPlayBang) { playable = true; onPress = () => { setBangSourceType('bang'); setTargetPickerFor(item.id); }; }
+            else if (item.card_type === 'missed' && isCalamityJanet && canPlayBang) { playable = true; onPress = () => { setBangSourceType('missed'); setTargetPickerFor(item.id); }; }
+            else if (item.card_type === 'beer' && canPlayBeer) { playable = true; onPress = handlePlayBeer; }
+            else if (item.card_type === 'duel' && canPlayDuel) { playable = true; onPress = () => setDuelTargetPickerFor(item.id); }
+            else if (item.card_type === 'indians' && canPlayIndians) { playable = true; onPress = handlePlayIndians; }
+            else if (item.card_type === 'prison' && canPlayPrison) { playable = true; onPress = () => setPrisonTargetPickerFor(item.id); }
+            else if (item.card_type === 'dynamite' && canPlayDynamite) { playable = true; onPress = handlePlayDynamite; }
+            else if (item.card_type === 'barrel' && canPlayBarrel) { playable = true; onPress = handlePlayBarrel; }
+            else if (item.card_type === 'saloon' && canPlaySaloon) { playable = true; onPress = handlePlaySaloon; }
+            else if (item.card_type === 'stagecoach' && canPlayStagecoach) { playable = true; onPress = handlePlayStagecoach; }
+            else if (item.card_type === 'wells_fargo' && canPlayWellsFargo) { playable = true; onPress = handlePlayWellsFargo; }
+            else if (item.card_type === 'mustang' && canPlayMustang) { playable = true; onPress = handlePlayMustang; }
+            else if (item.card_type === 'scope' && canPlayScope) { playable = true; onPress = handlePlayScope; }
+            else if (WEAPON_TYPES.includes(item.card_type) && canPlayWeapon) { playable = true; onPress = () => handlePlayWeapon(item.card_type); }
+            else if (item.card_type === 'panic' && canPlayPanic) { playable = true; onPress = () => handleOpenPanicPicker(item.id); }
+            else if (item.card_type === 'cat_balou' && canPlayCatBalou) { playable = true; onPress = () => handleOpenCatBalouPicker(item.id); }
+            else if (item.card_type === 'gatling' && canPlayGatling) { playable = true; onPress = handlePlayGatling; }
+            else if (item.card_type === 'general_store' && canPlayGeneralStore) { playable = true; onPress = handlePlayGeneralStore; }
+            return (
+              <PlayingCard
+                key={item.id}
+                cardType={item.card_type}
+                suit={item.suit}
+                value={item.value}
+                playable={playable}
+                onPress={playable ? onPress : undefined}
+              />
+            );
+          })}
         </View>
       )}
 
       {discarding && (
         <>
-          <Text style={styles.subtitle}>Choisis {excess} carte(s) à défausser :</Text>
-          <View>
+          <Text style={styles.bodyText}>Choisis {excess} carte(s) à défausser :</Text>
+          <View style={styles.handRow}>
             {hand.map(item => (
-              <Pressable key={item.id} style={styles.cardRow} onPress={() => toggleDiscardSelection(item.id)}>
-                <Text style={styles.cardLabel}>{selectedDiscards.includes(item.id) ? '☑' : '☐'} {CARD_LABELS[item.card_type] ?? item.card_type}</Text>
-              </Pressable>
+              <PlayingCard
+                key={item.id}
+                cardType={item.card_type}
+                suit={item.suit}
+                value={item.value}
+                selected={selectedDiscards.includes(item.id)}
+                onPress={() => toggleDiscardSelection(item.id)}
+              />
             ))}
           </View>
-          <Button title="Confirmer la défausse" onPress={handleConfirmEndTurn} disabled={actionLoading} />
-          <View style={styles.spacer} />
-          <Button title="Annuler" color="#999" onPress={() => { setDiscarding(false); setSelectedDiscards([]); }} disabled={actionLoading} />
+          <WoodButton title="Confirmer la défausse" onPress={handleConfirmEndTurn} disabled={actionLoading} variant="primary" style={styles.fullWidthBtn} />
+          <WoodButton title="Annuler" onPress={() => { setDiscarding(false); setSelectedDiscards([]); }} disabled={actionLoading} variant="muted" style={styles.fullWidthBtn} />
         </>
       )}
 
       {sidKetchumMode && (
         <>
-          <Text style={styles.subtitle}>Choisis 2 cartes à défausser pour regagner 1 PV :</Text>
-          <View>
+          <Text style={styles.bodyText}>Choisis 2 cartes à défausser pour regagner 1 PV :</Text>
+          <View style={styles.handRow}>
             {hand.map(item => (
-              <Pressable key={item.id} style={styles.cardRow} onPress={() => toggleSidSelection(item.id)}>
-                <Text style={styles.cardLabel}>{selectedSidCards.includes(item.id) ? '☑' : '☐'} {CARD_LABELS[item.card_type] ?? item.card_type}</Text>
-              </Pressable>
+              <PlayingCard
+                key={item.id}
+                cardType={item.card_type}
+                suit={item.suit}
+                value={item.value}
+                selected={selectedSidCards.includes(item.id)}
+                onPress={() => toggleSidSelection(item.id)}
+              />
             ))}
           </View>
-          <Button title="Confirmer" onPress={handleConfirmSidHeal} disabled={actionLoading} />
-          <View style={styles.spacer} />
-          <Button title="Annuler" color="#999" onPress={() => { setSidKetchumMode(false); setSelectedSidCards([]); }} disabled={actionLoading} />
+          <WoodButton title="Confirmer" onPress={handleConfirmSidHeal} disabled={actionLoading} variant="safe" style={styles.fullWidthBtn} />
+          <WoodButton title="Annuler" onPress={() => { setSidKetchumMode(false); setSelectedSidCards([]); }} disabled={actionLoading} variant="muted" style={styles.fullWidthBtn} />
         </>
       )}
 
-      {needsDegainer && <Button title="Dégainer" onPress={handleDegainer} disabled={actionLoading} />}
+      {needsDegainer && <WoodButton title="Dégainer" onPress={handleDegainer} disabled={actionLoading} style={styles.fullWidthBtn} />}
 
       {canDraw && myCharacter === 'jesse_jones' && (
         <>
-          <Button title="Piocher normalement" onPress={handleDraw} disabled={actionLoading} />
-          <View style={styles.spacer} />
-          <Button title="Piocher dans la main d'un adversaire" onPress={() => setJesseTargetPicker(true)} disabled={actionLoading || jesseTargets.length === 0} />
+          <WoodButton title="Piocher normalement" onPress={handleDraw} disabled={actionLoading} style={styles.fullWidthBtn} />
+          <WoodButton title="Piocher dans la main d'un adversaire" onPress={() => setJesseTargetPicker(true)} disabled={actionLoading || jesseTargets.length === 0} style={styles.fullWidthBtn} />
         </>
       )}
       {canDraw && myCharacter === 'pedro_ramirez' && (
         <>
-          <Button title="Piocher normalement" onPress={handleDraw} disabled={actionLoading} />
-          <View style={styles.spacer} />
-          <Button title="Piocher depuis la défausse" onPress={handleDrawPedroDiscard} disabled={actionLoading || discardTop.length === 0} />
+          <WoodButton title="Piocher normalement" onPress={handleDraw} disabled={actionLoading} style={styles.fullWidthBtn} />
+          <WoodButton title="Piocher depuis la défausse" onPress={handleDrawPedroDiscard} disabled={actionLoading || discardTop.length === 0} style={styles.fullWidthBtn} />
         </>
       )}
       {canDraw && myCharacter === 'kit_carlson' && !kitCarlsonCards && (
-        <Button title="Regarder le dessus de la pioche" onPress={handlePeekKitCarlson} disabled={actionLoading} />
+        <WoodButton title="Regarder le dessus de la pioche" onPress={handlePeekKitCarlson} disabled={actionLoading} style={styles.fullWidthBtn} />
       )}
       {canDraw && !['jesse_jones', 'pedro_ramirez', 'kit_carlson'].includes(myCharacter) && (
-        <Button title="Piocher" onPress={handleDraw} disabled={actionLoading} />
+        <WoodButton title="Piocher" onPress={handleDraw} disabled={actionLoading} style={styles.fullWidthBtn} />
       )}
 
       {kitCarlsonCards && (
-        <View style={styles.pendingBox}>
-          <Text style={styles.pendingTitle}>Choisissez 2 cartes à garder (la 3ᵉ retourne au-dessus de la pioche) :</Text>
-          {kitCarlsonCards.map((c, i) => (
-            <Pressable key={i} style={styles.cardRow} onPress={() => toggleKitCarlsonKeep(i)}>
-              <Text style={styles.cardLabel}>{kitCarlsonKeep.includes(i) ? '☑' : '☐'} {CARD_LABELS[c.type] ?? c.type} ({formatCardFace(c.suit, c.value)})</Text>
-            </Pressable>
-          ))}
-          <Button title="Confirmer" onPress={handleConfirmKitCarlson} disabled={actionLoading} />
-        </View>
+        <NoticeBox title="Kit Carlson">
+          <Text style={styles.noticeBody}>Choisissez 2 cartes à garder :</Text>
+          <View style={styles.handRow}>
+            {kitCarlsonCards.map((c, i) => (
+              <PlayingCard key={i} cardType={c.type} suit={c.suit} value={c.value} selected={kitCarlsonKeep.includes(i)} onPress={() => toggleKitCarlsonKeep(i)} />
+            ))}
+          </View>
+          <WoodButton title="Confirmer" onPress={handleConfirmKitCarlson} disabled={actionLoading} variant="safe" style={styles.noticeBtn} />
+        </NoticeBox>
       )}
 
       {myCharacter === 'sid_ketchum' && !amDead && me.life_points < me.max_life_points && hand.length >= 2 && !sidKetchumMode && !discarding && (
-        <Button title="Défausser 2 cartes pour +1 PV (Sid Ketchum)" onPress={() => setSidKetchumMode(true)} disabled={actionLoading} />
+        <WoodButton title="Défausser 2 cartes pour +1 PV (Sid Ketchum)" onPress={() => setSidKetchumMode(true)} disabled={actionLoading} variant="safe" style={styles.fullWidthBtn} />
       )}
 
       {canAct && (
-        <Button title={excess > 0 ? `Terminer le tour (défausser ${excess})` : 'Terminer le tour'} onPress={() => (excess > 0 ? setDiscarding(true) : handleConfirmEndTurn())} disabled={actionLoading} />
+        <WoodButton
+          title={excess > 0 ? `Terminer le tour (défausser ${excess})` : 'Terminer le tour'}
+          onPress={() => (excess > 0 ? setDiscarding(true) : handleConfirmEndTurn())}
+          disabled={actionLoading}
+          variant="primary"
+          style={styles.fullWidthBtn}
+        />
       )}
 
       <Text style={styles.sectionTitle}>Joueurs</Text>
-      <View>
-        {players.map(item => {
-          const tags = equipment.filter(e => e.player_id === item.id).map(e => EQUIPMENT_TAGS[e.card_type]).join(' ');
-          const role = item.is_sheriff ? 'sheriff' : rolesMap[item.id];
-          const roleLabel = !item.is_alive && role ? ` — ${ROLE_LABELS[role] ?? role}` : '';
-          const characterLabel = CHARACTER_LABELS[charactersMap[item.id]] ?? '';
-          const isOther = item.id !== playerId && item.is_alive && !amDead;
-          const distTo = isOther ? computeDistance(players, playerId, item.id, equipmentFlags) : null;
-          const distFrom = isOther ? computeDistance(players, item.id, playerId, equipmentFlags) : null;
-          const distanceLabel = isOther ? ` · vous→lui: ${distTo} · lui→vous: ${distFrom}` : '';
-          return (
-            <Text key={item.id} style={styles.playerRow}>
-              Siège {item.seat_position} ({characterLabel}){item.is_sheriff ? ' 🎖️' : ''} — {item.is_alive ? `${item.life_points} PV` : 'éliminé' + roleLabel}{item.id === playerId ? ' (vous)' : ''} {tags}{distanceLabel}
-            </Text>
-          );
-        })}
-      </View>
+      {players.map(item => {
+        const tags = equipment.filter(e => e.player_id === item.id).map(e => equipmentTags[e.card_type]).join(' ');
+        const role = item.is_sheriff ? 'sheriff' : rolesMap[item.id];
+        const character = characterLabels[charactersMap[item.id]] ?? '...';
+        const isOther = item.id !== playerId && item.is_alive && !amDead;
+        const distTo = isOther ? computeDistance(players, playerId, item.id, equipmentFlags) : null;
+        const distFrom = isOther ? computeDistance(players, item.id, playerId, equipmentFlags) : null;
+        return (
+          <View key={item.id} style={styles.playerRow}>
+            <View style={styles.seatBadge}><Text style={styles.seatBadgeText}>{item.seat_position}</Text></View>
+            <View style={styles.playerInfo}>
+              <Text style={styles.playerName}>
+                {character}{item.is_sheriff ? ' ★' : ''}{item.id === playerId ? ' (vous)' : ''} {tags}
+              </Text>
+              {item.is_alive ? (
+                <Text style={styles.playerMeta}>
+                  {renderPips(item.life_points, item.max_life_points)}
+                  {isOther ? `  ·  vous→lui : ${distTo}  ·  lui→vous : ${distFrom}` : ''}
+                </Text>
+              ) : (
+                <Text style={styles.playerMeta}>éliminé — {roleLabels[role] ?? role}</Text>
+              )}
+            </View>
+          </View>
+        );
+      })}
 
-      <Text style={styles.sectionTitle}>Défausse (3 dernières)</Text>
-      {discardTop.length === 0 ? (
-        <Text style={styles.hint}>Vide</Text>
-      ) : (
-        <View>
-          {discardTop.map(c => <Text key={c.id} style={styles.playerRow}>{CARD_LABELS[c.card_type] ?? c.card_type} ({formatCardFace(c.suit, c.value)})</Text>)}
-        </View>
-      )}
+      <Text style={styles.sectionTitle}>Défausse</Text>
+      <View style={styles.discardRow}>
+        {discardTop.length === 0 && <Text style={styles.hint}>Vide</Text>}
+        {discardTop.map((c, i) => (
+          <View key={c.id} style={{ marginLeft: i === 0 ? 0 : -16 }}>
+            <PlayingCard cardType={c.card_type} suit={c.suit} value={c.value} size="small" />
+          </View>
+        ))}
+      </View>
 
       <Modal visible={!!targetPickerFor} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
-            <Text style={styles.subtitle}>Choisir une cible (portée {myWeaponRange}) :</Text>
-            {bangTargets.map(t => <Button key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayBang(t.id)} />)}
-            <View style={styles.spacer} />
-            <Button title="Annuler" color="#999" onPress={() => setTargetPickerFor(null)} />
+            <Text style={styles.modalTitle}>Choisir une cible (portée {myWeaponRange})</Text>
+            {bangTargets.map(t => <WoodButton key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayBang(t.id)} style={styles.noticeBtn} />)}
+            <WoodButton title="Annuler" onPress={() => setTargetPickerFor(null)} variant="muted" style={styles.noticeBtn} />
           </View>
         </View>
       </Modal>
@@ -694,10 +718,9 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
       <Modal visible={!!duelTargetPickerFor} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
-            <Text style={styles.subtitle}>Choisir une cible pour le Duel :</Text>
-            {duelTargets.map(t => <Button key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayDuel(t.id)} />)}
-            <View style={styles.spacer} />
-            <Button title="Annuler" color="#999" onPress={() => setDuelTargetPickerFor(null)} />
+            <Text style={styles.modalTitle}>Choisir une cible pour le Duel</Text>
+            {duelTargets.map(t => <WoodButton key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayDuel(t.id)} style={styles.noticeBtn} />)}
+            <WoodButton title="Annuler" onPress={() => setDuelTargetPickerFor(null)} variant="muted" style={styles.noticeBtn} />
           </View>
         </View>
       </Modal>
@@ -705,10 +728,9 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
       <Modal visible={!!prisonTargetPickerFor} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
-            <Text style={styles.subtitle}>Choisir une cible pour Prison :</Text>
-            {prisonTargets.map(t => <Button key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayPrison(t.id)} />)}
-            <View style={styles.spacer} />
-            <Button title="Annuler" color="#999" onPress={() => setPrisonTargetPickerFor(null)} />
+            <Text style={styles.modalTitle}>Choisir une cible pour Prison</Text>
+            {prisonTargets.map(t => <WoodButton key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayPrison(t.id)} style={styles.noticeBtn} />)}
+            <WoodButton title="Annuler" onPress={() => setPrisonTargetPickerFor(null)} variant="muted" style={styles.noticeBtn} />
           </View>
         </View>
       </Modal>
@@ -716,10 +738,11 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
       <Modal visible={!!panicTargetPickerFor} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
-            <Text style={styles.subtitle}>Choisir une cible pour Braquage! (portée 1) :</Text>
-            {panicTargets.map(t => <Button key={t.id} title={`Siège ${t.seat_position}`} onPress={() => { setPanicTargetPickerFor(null); setStealFlow({ targetId: t.id }); }} />)}
-            <View style={styles.spacer} />
-            <Button title="Annuler" color="#999" onPress={() => setPanicTargetPickerFor(null)} />
+            <Text style={styles.modalTitle}>Choisir une cible pour Braquage! (portée 1)</Text>
+            {panicTargets.map(t => (
+              <WoodButton key={t.id} title={`Siège ${t.seat_position}`} onPress={() => { setPanicTargetPickerFor(null); setStealFlow({ targetId: t.id }); }} style={styles.noticeBtn} />
+            ))}
+            <WoodButton title="Annuler" onPress={() => setPanicTargetPickerFor(null)} variant="muted" style={styles.noticeBtn} />
           </View>
         </View>
       </Modal>
@@ -727,10 +750,9 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
       <Modal visible={!!catbalouTargetPickerFor} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
-            <Text style={styles.subtitle}>Choisir une cible pour Coup de foudre :</Text>
-            {catBalouTargets.map(t => <Button key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayCatBalou(t.id)} />)}
-            <View style={styles.spacer} />
-            <Button title="Annuler" color="#999" onPress={() => setCatbalouTargetPickerFor(null)} />
+            <Text style={styles.modalTitle}>Choisir une cible pour Coup de foudre</Text>
+            {catBalouTargets.map(t => <WoodButton key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handlePlayCatBalou(t.id)} style={styles.noticeBtn} />)}
+            <WoodButton title="Annuler" onPress={() => setCatbalouTargetPickerFor(null)} variant="muted" style={styles.noticeBtn} />
           </View>
         </View>
       </Modal>
@@ -738,13 +760,12 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
       <Modal visible={!!stealFlow} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
-            <Text style={styles.subtitle}>Voler quelle carte ?</Text>
-            <Button title="Carte au hasard en main" onPress={() => handleSteal('hand')} disabled={actionLoading} />
+            <Text style={styles.modalTitle}>Voler quelle carte ?</Text>
+            <WoodButton title="Carte au hasard en main" onPress={() => handleSteal('hand')} disabled={actionLoading} style={styles.noticeBtn} />
             {equipment.filter(e => e.player_id === stealFlow?.targetId).map(e => (
-              <Button key={e.card_type} title={`${CARD_LABELS[e.card_type] ?? e.card_type} (en jeu)`} onPress={() => handleSteal('in_play', e.card_type)} disabled={actionLoading} />
+              <WoodButton key={e.card_type} title={`${cardLabels[e.card_type] ?? e.card_type} (en jeu)`} onPress={() => handleSteal('in_play', e.card_type)} disabled={actionLoading} style={styles.noticeBtn} />
             ))}
-            <View style={styles.spacer} />
-            <Button title="Annuler" color="#999" onPress={() => setStealFlow(null)} />
+            <WoodButton title="Annuler" onPress={() => setStealFlow(null)} variant="muted" style={styles.noticeBtn} />
           </View>
         </View>
       </Modal>
@@ -752,10 +773,9 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
       <Modal visible={jesseTargetPicker} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
-            <Text style={styles.subtitle}>Piocher dans la main de qui ?</Text>
-            {jesseTargets.map(t => <Button key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handleDrawJesseSteal(t.id)} />)}
-            <View style={styles.spacer} />
-            <Button title="Annuler" color="#999" onPress={() => setJesseTargetPicker(false)} />
+            <Text style={styles.modalTitle}>Piocher dans la main de qui ?</Text>
+            {jesseTargets.map(t => <WoodButton key={t.id} title={`Siège ${t.seat_position}`} onPress={() => handleDrawJesseSteal(t.id)} style={styles.noticeBtn} />)}
+            <WoodButton title="Annuler" onPress={() => setJesseTargetPicker(false)} variant="muted" style={styles.noticeBtn} />
           </View>
         </View>
       </Modal>
@@ -764,19 +784,44 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
 }
 
 const styles = StyleSheet.create({
-  flexFill: { flex: 1 },
-  container: { padding: 24, paddingTop: 60, paddingBottom: 48, gap: 8 },
-  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, gap: 8 },
-  title: { fontSize: 22, fontWeight: 'bold' },
-  subtitle: { fontSize: 16, marginTop: 12, marginBottom: 4 },
-  sectionTitle: { fontSize: 18, fontWeight: 'bold', marginTop: 20 },
-  cardRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderColor: '#eee' },
-  cardLabel: { fontSize: 16 },
-  playerRow: { fontSize: 15, paddingVertical: 4 },
-  pendingBox: { backgroundColor: '#fee', padding: 16, borderRadius: 8, marginVertical: 12, gap: 8 },
-  pendingTitle: { fontWeight: 'bold', marginBottom: 4 },
-  spacer: { height: 8 },
-  hint: { color: '#999', fontStyle: 'italic' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
-  modalBox: { backgroundColor: 'white', padding: 24, borderRadius: 12, width: '80%', gap: 8 },
+  flexFill: { flex: 1, backgroundColor: colors.parchment },
+  container: { padding: 20, paddingTop: 56, paddingBottom: 48, gap: 6 },
+  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, gap: 8, backgroundColor: colors.parchment },
+  title: { fontFamily: fonts.display, fontSize: 28, color: colors.blood },
+  bodyText: { fontFamily: fonts.body, fontSize: 14, color: colors.ink },
+  hint: { fontFamily: fonts.body, fontSize: 13, color: colors.leatherDark, fontStyle: 'italic' },
+  debugHint: { fontFamily: fonts.body, fontSize: 10, color: colors.leatherDark, opacity: 0.7, marginBottom: 8 },
+  plaque: { backgroundColor: colors.leather, borderWidth: 2, borderColor: colors.ink, borderRadius: 10, padding: 14 },
+  plaqueRoleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
+  starIcon: { color: colors.brass, fontSize: 16 },
+  plaqueRole: { fontFamily: fonts.display, fontSize: 17, color: colors.parchmentLight },
+  plaquePips: { fontFamily: fonts.body, fontSize: 15, color: colors.brass, letterSpacing: 2 },
+  plaqueSub: { fontFamily: fonts.body, fontSize: 12, color: colors.parchmentLight, opacity: 0.9 },
+  sectionTitle: { fontFamily: fonts.display, fontSize: 16, color: colors.leatherDark, marginTop: 18, marginBottom: 6 },
+  notice: {
+    backgroundColor: colors.parchmentLight, borderWidth: 2, borderColor: colors.ink, borderStyle: 'dashed',
+    borderRadius: 6, padding: 12, marginTop: 10, gap: 6,
+  },
+  noticeHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  noticeTitle: { fontFamily: fonts.display, fontSize: 14, color: colors.blood },
+  noticeTimer: { fontFamily: fonts.bodyBold, fontSize: 12, color: colors.leatherDark },
+  noticeBody: { fontFamily: fonts.body, fontSize: 13, color: colors.ink, lineHeight: 18 },
+  noticeMeta: { fontFamily: fonts.body, fontSize: 12, color: colors.leatherDark, fontStyle: 'italic' },
+  noticeBtn: { marginTop: 4 },
+  waitingText: { fontFamily: fonts.body, fontSize: 13, color: colors.leatherDark, marginTop: 10, fontStyle: 'italic' },
+  handRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingVertical: 6 },
+  fullWidthBtn: { marginTop: 10 },
+  playerRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8,
+    borderBottomWidth: 1, borderBottomColor: 'rgba(43,27,18,0.15)',
+  },
+  seatBadge: { width: 28, height: 28, borderRadius: 14, backgroundColor: colors.leather, alignItems: 'center', justifyContent: 'center' },
+  seatBadgeText: { fontFamily: fonts.bodyBold, color: colors.parchmentLight, fontSize: 13 },
+  playerInfo: { flex: 1 },
+  playerName: { fontFamily: fonts.bodyBold, fontSize: 14, color: colors.ink },
+  playerMeta: { fontFamily: fonts.body, fontSize: 12, color: colors.leatherDark, marginTop: 1 },
+  discardRow: { flexDirection: 'row', paddingVertical: 6, paddingLeft: 8 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(43,27,18,0.6)', justifyContent: 'center', alignItems: 'center' },
+  modalBox: { backgroundColor: colors.parchmentLight, borderWidth: 2, borderColor: colors.ink, borderRadius: 12, padding: 20, width: '82%', gap: 8 },
+  modalTitle: { fontFamily: fonts.display, fontSize: 15, color: colors.leatherDark, marginBottom: 6 },
 });

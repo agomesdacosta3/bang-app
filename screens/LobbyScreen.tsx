@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { View, Text, Button, FlatList, StyleSheet, Alert } from 'react-native';
+import { View, Text, FlatList, StyleSheet, Alert } from 'react-native';
 import { supabase } from '../lib/supabase';
-import { callFunction } from '../lib/functions';
+import { colors, fonts } from '../theme';
+import WoodButton from '../components/WoodButton';
 
 type Player = { id: string; seat_position: number };
 
@@ -43,7 +44,8 @@ export default function LobbyScreen({
   async function handleStart() {
     setStarting(true);
     try {
-      await callFunction('start-game', { gameId });
+      const { error } = await supabase.functions.invoke('start-game', { body: { gameId } });
+      if (error) throw error;
     } catch (err: any) {
       Alert.alert('Erreur', err.message ?? String(err));
     } finally {
@@ -56,28 +58,51 @@ export default function LobbyScreen({
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Salle d'attente</Text>
-      {joinCode && <Text style={styles.code}>Code : {joinCode}</Text>}
+      {joinCode && (
+        <View style={styles.codeBadge}>
+          <Text style={styles.codeLabel}>Code de la partie</Text>
+          <Text style={styles.codeValue}>{joinCode}</Text>
+        </View>
+      )}
       <Text style={styles.subtitle}>{players.length} joueur(s)</Text>
       <FlatList
         data={players}
         keyExtractor={p => p.id}
         renderItem={({ item }) => (
-          <Text style={styles.playerRow}>Siège {item.seat_position}{item.id === playerId ? ' (vous)' : ''}</Text>
+          <View style={styles.playerRow}>
+            <View style={styles.seatBadge}><Text style={styles.seatBadgeText}>{item.seat_position}</Text></View>
+            <Text style={styles.playerName}>Siège {item.seat_position}{item.id === playerId ? ' (vous)' : ''}</Text>
+          </View>
         )}
         style={styles.list}
       />
-      <Button title="Démarrer la partie" onPress={handleStart} disabled={!canStart || starting} />
+      <WoodButton title="Démarrer la partie" onPress={handleStart} disabled={!canStart || starting} variant="primary" style={styles.button} />
       {!canStart && <Text style={styles.hint}>Entre 4 et 7 joueurs requis</Text>}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, alignItems: 'center', padding: 24, paddingTop: 60, gap: 12 },
-  title: { fontSize: 28, fontWeight: 'bold' },
-  code: { fontSize: 22, fontWeight: 'bold', marginTop: 8 },
-  subtitle: { fontSize: 16, color: '#555' },
-  list: { width: '100%', marginVertical: 16 },
-  playerRow: { fontSize: 18, paddingVertical: 6, textAlign: 'center' },
-  hint: { color: '#999', marginTop: 8 },
+  container: { flex: 1, alignItems: 'center', padding: 24, paddingTop: 60, gap: 12, backgroundColor: colors.parchment },
+  title: { fontFamily: fonts.display, fontSize: 28, color: colors.leatherDark },
+  codeBadge: {
+    borderWidth: 2,
+    borderColor: colors.ink,
+    borderRadius: 8,
+    backgroundColor: colors.parchmentLight,
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  codeLabel: { fontFamily: fonts.body, fontSize: 11, color: colors.leatherDark },
+  codeValue: { fontFamily: fonts.display, fontSize: 26, color: colors.brass, letterSpacing: 3 },
+  subtitle: { fontFamily: fonts.body, fontSize: 14, color: colors.leatherDark },
+  list: { width: '100%', marginVertical: 12 },
+  playerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: 'rgba(43,27,18,0.15)' },
+  seatBadge: { width: 26, height: 26, borderRadius: 13, backgroundColor: colors.leather, alignItems: 'center', justifyContent: 'center' },
+  seatBadgeText: { fontFamily: fonts.bodyBold, color: colors.parchmentLight, fontSize: 12 },
+  playerName: { fontFamily: fonts.body, fontSize: 15, color: colors.ink },
+  button: { width: 240, marginTop: 12 },
+  hint: { fontFamily: fonts.body, color: colors.leatherDark, fontSize: 12, fontStyle: 'italic' },
 });
