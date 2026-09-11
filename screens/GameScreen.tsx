@@ -16,7 +16,7 @@ type Game = {
   pending_type: string | null; pending_initiator_id: string | null; pending_expires_at: string | null;
   pending_event_id: string | null; winner_team: string | null;
 };
-type Player = SeatedPlayer & { is_sheriff: boolean; life_points: number; max_life_points: number; has_played_bang_this_turn: boolean };
+type Player = SeatedPlayer & { is_sheriff: boolean; life_points: number; max_life_points: number; has_played_bang_this_turn: boolean; nickname: string | null };
 type HandCard = { id: string; card_type: string; suit: string; value: number };
 type Equipment = { player_id: string; card_type: string };
 type StoreCard = { id: string; card_type: string; suit: string; value: number };
@@ -83,17 +83,19 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const isMyTurn = game?.current_player_id === playerId;
   const hasPending = !!game?.pending_type;
 
-  function nameFor(id: string | null | undefined): string {
-    const p = players.find(pl => pl.id === id);
+  function displayName(p: Player | undefined): string {
     if (!p) return 'Un joueur';
-    return characterLabels[charactersMap[p.id]] ?? 'Un joueur';
+    const charLabel = characterLabels[charactersMap[p.id]] ?? 'Un joueur';
+    return p.nickname ? `${charLabel} (${p.nickname})` : charLabel;
+  }
+
+  function nameFor(id: string | null | undefined): string {
+    return displayName(players.find(pl => pl.id === id));
   }
 
   function nameForSeat(seat: number | null): string {
     if (seat === null || seat === undefined) return 'Un joueur';
-    const p = players.find(pl => pl.seat_position === seat);
-    if (!p) return 'Un joueur';
-    return characterLabels[charactersMap[p.id]] ?? 'Un joueur';
+    return displayName(players.find(pl => pl.seat_position === seat));
   }
 
   function Bold({ children }: { children: React.ReactNode }) {
@@ -539,8 +541,9 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const mustChooseCatBalouDiscard = myPendingRow && game.pending_type === 'cat_balou_discard';
   const isMyStoreTurn = myPendingRow?.is_current_turn && game.pending_type === 'general_store';
   const waitingOnOthers = hasPending && !mustRespondToBang && !mustRespondToGatling && !mustRespondToDuel && !mustRespondToIndians && !mustChooseCatBalouDiscard && !isMyStoreTurn;
-
+  
   const timerLabel = secondsLeft !== null ? `⏱ ${secondsLeft}s` : undefined;
+  const equipmentTagsLegend = Object.entries(equipmentTags).map(([type, icon]) => `${icon} ${cardLabels[type] ?? type}`);
 
   return (
     <ScrollView style={styles.flexFill} contentContainerStyle={styles.container}>
@@ -551,7 +554,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
           <Text style={styles.plaquePips}>{renderPips(me.life_points, me.max_life_points)}</Text>
         </View>
         <Text style={styles.plaqueObjective}>{roleObjectives[myRole] ?? ''}</Text>
-        <Text style={styles.plaqueSub}>{characterLabels[myCharacter] ?? '...'} · {myWeaponName} (portée {myWeaponRange})</Text>
+        <Text style={styles.plaqueSub}>{displayName(me)} · {myWeaponName} (portée {myWeaponRange})</Text>
         <Text style={styles.plaqueDescription}>{characterDescriptions[myCharacter] ?? ''}</Text>
       </View>
 
@@ -789,19 +792,19 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
       {players.map(item => {
         const tags = equipment.filter(e => e.player_id === item.id).map(e => equipmentTags[e.card_type]).join(' ');
         const role = item.is_sheriff ? 'sheriff' : rolesMap[item.id];
-        const character = characterLabels[charactersMap[item.id]] ?? '...';
         const isOther = item.id !== playerId && item.is_alive && !amDead;
         const distTo = isOther ? computeDistance(players, playerId, item.id, equipmentFlags) : null;
         const distFrom = isOther ? computeDistance(players, item.id, playerId, equipmentFlags) : null;
         const isCurrentTurn = item.id === game.current_player_id && item.is_alive;
+        
         return (
           <View key={item.id} style={[styles.playerRow, isCurrentTurn && styles.playerRowActive]}>
             <View style={styles.seatBadge}>
               <Text style={styles.seatBadgeText}>{item.is_alive ? `${item.life_points}\u2764` : '\u2620'}</Text>
             </View>
             <View style={styles.playerInfo}>
-              <Text style={[styles.playerName, !item.is_alive && styles.playerNameDead]}>
-                {character}{item.is_sheriff ? ' ★' : ''}{item.id === playerId ? ' (vous)' : ''} {tags}
+              <Text style={[styles.playerName, item.id === playerId && styles.playerNameSelf, !item.is_alive && styles.playerNameDead]}>
+                {displayName(item)}{item.is_sheriff ? ' ★' : ''}
               </Text>
               {item.is_alive ? (
                 <Text style={styles.playerMeta}>
@@ -811,10 +814,15 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
               ) : (
                 <Text style={styles.playerMeta}>éliminé — {roleLabels[role] ?? role}</Text>
               )}
+              {!!tags && <Text style={styles.playerEquipment}>{tags}</Text>}
             </View>
           </View>
         );
       })}
+
+      {equipmentTagsLegend.length > 0 && (
+        <Text style={styles.equipmentLegend}>{equipmentTagsLegend.join('  ·  ')}</Text>
+      )}
 
       <Text style={styles.sectionTitle}>Haut de la défausse</Text>
       <View style={styles.discardRow}>
@@ -831,7 +839,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Choisir une cible (portée {myWeaponRange})</Text>
-            {bangTargets.map(t => <WoodButton key={t.id} title={characterLabels[charactersMap[t.id]] ?? '...'} onPress={() => handlePlayBang(t.id)} style={styles.noticeBtn} />)}
+            {bangTargets.map(t => <WoodButton key={t.id} title={displayName(t)} onPress={() => handlePlayBang(t.id)} style={styles.noticeBtn} />)}
             <WoodButton title="Annuler" onPress={() => setTargetPickerFor(null)} variant="muted" style={styles.noticeBtn} />
           </View>
         </View>
@@ -841,7 +849,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Choisir une cible pour le Duel</Text>
-            {duelTargets.map(t => <WoodButton key={t.id} title={characterLabels[charactersMap[t.id]] ?? '...'} onPress={() => handlePlayDuel(t.id)} style={styles.noticeBtn} />)}
+            {duelTargets.map(t => <WoodButton key={t.id} title={displayName(t)} onPress={() => handlePlayDuel(t.id)} style={styles.noticeBtn} />)}
             <WoodButton title="Annuler" onPress={() => setDuelTargetPickerFor(null)} variant="muted" style={styles.noticeBtn} />
           </View>
         </View>
@@ -851,7 +859,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Choisir une cible pour Prison</Text>
-            {prisonTargets.map(t => <WoodButton key={t.id} title={characterLabels[charactersMap[t.id]] ?? '...'} onPress={() => handlePlayPrison(t.id)} style={styles.noticeBtn} />)}
+            {prisonTargets.map(t => <WoodButton key={t.id} title={displayName(t)} onPress={() => handlePlayPrison(t.id)} style={styles.noticeBtn} />)}
             <WoodButton title="Annuler" onPress={() => setPrisonTargetPickerFor(null)} variant="muted" style={styles.noticeBtn} />
           </View>
         </View>
@@ -862,7 +870,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Choisir une cible pour Braquage! (portée 1)</Text>
             {panicTargets.map(t => (
-              <WoodButton key={t.id} title={characterLabels[charactersMap[t.id]] ?? '...'} onPress={() => { setPanicTargetPickerFor(null); setStealFlow({ targetId: t.id }); }} style={styles.noticeBtn} />
+              <WoodButton key={t.id} title={displayName(t)} onPress={() => { setPanicTargetPickerFor(null); setStealFlow({ targetId: t.id }); }} style={styles.noticeBtn} />
             ))}
             <WoodButton title="Annuler" onPress={() => setPanicTargetPickerFor(null)} variant="muted" style={styles.noticeBtn} />
           </View>
@@ -873,7 +881,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Choisir une cible pour Coup de foudre</Text>
-            {catBalouTargets.map(t => <WoodButton key={t.id} title={characterLabels[charactersMap[t.id]] ?? '...'} onPress={() => handlePlayCatBalou(t.id)} style={styles.noticeBtn} />)}
+            {catBalouTargets.map(t => <WoodButton key={t.id} title={displayName(t)} onPress={() => handlePlayCatBalou(t.id)} style={styles.noticeBtn} />)}
             <WoodButton title="Annuler" onPress={() => setCatbalouTargetPickerFor(null)} variant="muted" style={styles.noticeBtn} />
           </View>
         </View>
@@ -896,7 +904,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Piocher dans la main de qui ?</Text>
-            {jesseTargets.map(t => <WoodButton key={t.id} title={characterLabels[charactersMap[t.id]] ?? '...'} onPress={() => handleDrawJesseSteal(t.id)} style={styles.noticeBtn} />)}
+            {jesseTargets.map(t => <WoodButton key={t.id} title={displayName(t)} onPress={() => handleDrawJesseSteal(t.id)} style={styles.noticeBtn} />)}
             <WoodButton title="Annuler" onPress={() => setJesseTargetPicker(false)} variant="muted" style={styles.noticeBtn} />
           </View>
         </View>
@@ -925,7 +933,7 @@ const styles = StyleSheet.create({
     height: 180, backgroundColor: colors.parchmentLight, borderWidth: 2, borderColor: colors.ink,
     borderStyle: 'dashed', borderRadius: 6, padding: 10,
   },
-  confrontationScroll: { height: 170, marginTop: 2 },
+  confrontationScroll: { height: 320, marginTop: 2 },
   notice: {
     backgroundColor: colors.parchmentLight, borderWidth: 2, borderColor: colors.ink, borderStyle: 'dashed',
     borderRadius: 6, padding: 12, marginTop: 10, gap: 3,
@@ -950,6 +958,7 @@ const styles = StyleSheet.create({
   seatBadge: { minWidth: 34, height: 28, borderRadius: 14, backgroundColor: colors.leather, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
   seatBadgeText: { fontFamily: fonts.bodyBold, color: colors.parchmentLight, fontSize: 12 },
   playerInfo: { flex: 1 },
+  playerNameSelf: { color: colors.brass },
   playerName: { fontFamily: fonts.bodyBold, fontSize: 14, color: colors.ink },
   playerNameDead: { textDecorationLine: 'line-through', color: colors.leatherDark },
   playerMeta: { fontFamily: fonts.body, fontSize: 12, color: colors.leatherDark, marginTop: 1 },
@@ -959,4 +968,6 @@ const styles = StyleSheet.create({
   modalOverlay: { flex: 1, backgroundColor: 'rgba(43,27,18,0.6)', justifyContent: 'center', alignItems: 'center' },
   modalBox: { backgroundColor: colors.parchmentLight, borderWidth: 2, borderColor: colors.ink, borderRadius: 12, padding: 20, width: '82%', gap: 8 },
   modalTitle: { fontFamily: fonts.display, fontSize: 15, color: colors.leatherDark, marginBottom: 6 },
+  playerEquipment: { fontFamily: fonts.body, fontSize: 13, marginTop: 2 },
+  equipmentLegend: { fontFamily: fonts.body, fontSize: 11, color: colors.leatherDark, marginTop: 8, fontStyle: 'italic' },
 });

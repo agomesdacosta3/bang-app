@@ -5,16 +5,18 @@ import { Arvo_400Regular, Arvo_700Bold } from '@expo-google-fonts/arvo';
 import { supabase } from './lib/supabase';
 import HomeScreen from './screens/HomeScreen';
 import LobbyScreen from './screens/LobbyScreen';
+import GameStartScreen from './screens/GameStartScreen';
 import GameScreen from './screens/GameScreen';
 import { colors } from './theme';
 
 type GameState = { gameId: string; playerId: string; joinCode?: string };
+type Phase = 'home' | 'lobby' | 'preparing' | 'playing';
 
 export default function App() {
   const [fontsLoaded] = useFonts({ Rye_400Regular, Arvo_400Regular, Arvo_700Bold });
   const [ready, setReady] = useState(false);
   const [gameState, setGameState] = useState<GameState | null>(null);
-  const [gameStarted, setGameStarted] = useState(false);
+  const [phase, setPhase] = useState<Phase>('home');
 
   useEffect(() => {
     (async () => {
@@ -31,27 +33,35 @@ export default function App() {
     return <SafeAreaView style={styles.container}><ActivityIndicator size="large" color={colors.leather} /></SafeAreaView>;
   }
 
-  if (gameState && gameStarted) {
+  if (gameState && phase === 'playing') {
     return (
       <SafeAreaView style={styles.flexFill}>
-        <GameScreen
-          gameId={gameState.gameId}
-          playerId={gameState.playerId}
-          onLeave={() => { setGameState(null); setGameStarted(false); }}
-        />
+        <GameScreen gameId={gameState.gameId} playerId={gameState.playerId} onLeave={() => { setGameState(null); setPhase('home'); }} />
       </SafeAreaView>
     );
   }
 
-  if (gameState) {
+  if (gameState && phase === 'preparing') {
     return (
       <SafeAreaView style={styles.flexFill}>
-        <LobbyScreen gameId={gameState.gameId} playerId={gameState.playerId} joinCode={gameState.joinCode} onGameStarted={() => setGameStarted(true)} />
+        <GameStartScreen gameId={gameState.gameId} playerId={gameState.playerId} onReady={() => setPhase('playing')} />
       </SafeAreaView>
     );
   }
 
-  return <SafeAreaView style={styles.flexFill}><HomeScreen onJoined={setGameState} /></SafeAreaView>;
+  if (gameState && phase === 'lobby') {
+    return (
+      <SafeAreaView style={styles.flexFill}>
+        <LobbyScreen gameId={gameState.gameId} playerId={gameState.playerId} joinCode={gameState.joinCode} onGameStarted={() => setPhase('preparing')} />
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.flexFill}>
+      <HomeScreen onJoined={(state) => { setGameState(state); setPhase('lobby'); }} />
+    </SafeAreaView>
+  );
 }
 
 const styles = StyleSheet.create({

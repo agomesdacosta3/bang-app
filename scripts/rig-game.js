@@ -1,8 +1,13 @@
-// Crée une partie de test complète à partir d'un code, applique un scénario (rôle/personnage/main/
-// équipement/vie/action forcée) sur les sièges choisis, puis fait tourner la partie jusqu'à la fin.
+// Crée une partie de test complète à partir d'un code, applique un scénario (rôle/personnage/main)
+// sur les sièges choisis, puis fait tourner la partie jusqu'à la fin.
 // Usage : 1) crée une partie depuis le téléphone, note le code
 //         2) édite RIG ci-dessous
 //         3) node scripts/rig-game.js CODE
+//
+// Depuis l'introduction du système "prêt", les bots doivent désormais choisir un pseudo et se
+// déclarer prêts comme le ferait un vrai joueur — la partie démarre automatiquement dès que TOI
+// (siège 0) te déclares prêt en dernier sur ton téléphone. Ce script ne peut pas déclarer le
+// siège 0 prêt à ta place.
 //
 // Seule limite : le rôle du siège qui est Shérif ne peut pas être changé.
 
@@ -16,20 +21,11 @@ if (!JOIN_CODE) {
 }
 
 // Édite ici : seat_position -> { role?, character?, hand?, inPlay?, life?, forcedAction? }
-// role : 'deputy' | 'outlaw' | 'renegade' (sans effet si ce siège est le Shérif)
-// character : n'importe lequel des 16
-// hand : liste de card_type, ou d'objets { type, suit, value } pour une carte précise
-// inPlay : pareil, mais pose directement la carte "en jeu" plutôt qu'en main
-// life : force life_points ET max_life_points à cette valeur exacte, après tout ajustement de personnage —
-//        utile pour provoquer une élimination rapidement en test
-// forcedAction : { type: 'bang' | 'duel' | 'indians', targetSeat? } — force ce bot à jouer cette carte
-//                une seule fois, à son prochain tour, avant de reprendre un comportement normal
-//                (targetSeat requis pour 'bang'/'duel', ignoré pour 'indians')
-
 const RIG = {
-
+  
 };
 
+const BOT_NICKNAMES = ['Bandit1', 'Bandit2', 'Bandit3'];
 const CHARACTER_BASE_LIFE = { paul_regret: 3, el_gringo: 3 };
 const SUITS = ['hearts', 'diamonds', 'clubs', 'spades'];
 function randomSuitValue() {
@@ -37,6 +33,15 @@ function randomSuitValue() {
 }
 
 const admin = createClient(LOCAL_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+
+function waitForGameStart(gameId) {
+  return new Promise(resolve => {
+    const check = setInterval(async () => {
+      const { data } = await admin.from('games').select('status').eq('id', gameId).single();
+      if (data?.status === 'in_progress') { clearInterval(check); resolve(); }
+    }, 1000);
+  });
+}
 
 async function run() {
   const bots = [];
@@ -51,7 +56,14 @@ async function run() {
     console.log(`Bot rejoint — siège ${joined.seatPosition}`);
   }
 
-  await call('start-game', bots[0].token, { gameId });
+  for (let i = 0; i < bots.length; i++) {
+    await call('set-nickname', bots[i].token, { gameId, nickname: BOT_NICKNAMES[i] ?? `Bot${i + 1}` });
+    await call('toggle-ready', bots[i].token, { gameId });
+    console.log(`Bot siège ${bots[i].seat} → pseudo défini et prêt`);
+  }
+
+  console.log('\nEn attente que tu choisisses un pseudo et te déclares prêt sur le téléphone...');
+  await waitForGameStart(gameId);
   console.log('Partie démarrée.');
 
   const { data: players } = await admin.from('players').select('*').eq('game_id', gameId).order('seat_position');
