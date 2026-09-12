@@ -6,7 +6,7 @@ import WoodButton from '../components/WoodButton';
 
 type GameState = { gameId: string; playerId: string; joinCode?: string };
 
-export default function HomeScreen({ onJoined }: { onJoined: (state: GameState) => void }) {
+export default function HomeScreen({ onJoined, onOfflineRequested }: { onJoined: (state: GameState) => void; onOfflineRequested: () => void }) {
   const [joinCodeInput, setJoinCodeInput] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -19,8 +19,9 @@ export default function HomeScreen({ onJoined }: { onJoined: (state: GameState) 
   async function handleCreate() {
     setLoading(true);
     try {
-      const data = await callFunction('create-game', {});
-      onJoined({ gameId: data.gameId, playerId: data.playerId, joinCode: data.joinCode });
+      const created = await callFunction('create-game', {});
+      const joined = await callFunction('join-game', { joinCode: created.joinCode });
+      onJoined({ gameId: joined.gameId, playerId: joined.playerId, joinCode: created.joinCode });
     } catch (err: any) {
       Alert.alert('Erreur', err.message ?? String(err));
     } finally {
@@ -68,6 +69,9 @@ export default function HomeScreen({ onJoined }: { onJoined: (state: GameState) 
           onChangeText={setJoinCodeInput}
         />
         <WoodButton title="Rejoindre" onPress={handleJoin} disabled={loading} style={styles.button} />
+
+        <Text style={styles.orText}>— ou —</Text>
+        <WoodButton title="Jouer hors ligne" onPress={onOfflineRequested} variant="safe" style={styles.button} />
       </ScrollView>
     </KeyboardAvoidingView>
   );

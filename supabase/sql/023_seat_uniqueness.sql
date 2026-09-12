@@ -1,0 +1,1 @@
+alter table players add constraint players_game_seat_unique unique (game_id, seat_position);

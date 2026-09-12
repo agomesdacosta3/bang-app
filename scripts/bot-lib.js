@@ -88,6 +88,9 @@ function formatEventConsole(e) {
     case 'panic_played': return `Siège ${e.actor_seat} vole ${CARD_LABELS_CONSOLE[e.card_type] ?? e.card_type} à Siège ${e.target_seat} (Braquage!)`;
     case 'catbalou_played': return `Siège ${e.actor_seat} joue Coup de foudre sur Siège ${e.target_seat}`;
     case 'general_store_played': return `Siège ${e.actor_seat} joue Magasin`;
+    case 'turn_auto_passed': return `Siège ${e.actor_seat} passe automatiquement (inactivité)`;
+    case 'player_abandoned': return `Siège ${e.actor_seat} abandonne la partie`;
+    case 'player_timed_out': return `Siège ${e.actor_seat} est éliminé pour inactivité prolongée`;
     case 'degainer_draw':
       return e.drawn_suit_2
         ? `Siège ${e.actor_seat} dégaine (Lucky Duke) : ${formatCard(e.drawn_suit, e.drawn_value)} gardée, ${formatCard(e.drawn_suit_2, e.drawn_value_2)} écartée`
@@ -152,6 +155,7 @@ async function respondIfPending(bot, gameId, pollEvents) {
         await call('respond-catbalou', bot.token, { gameId, inPlayCardType: pick.cardType });
       }
       if (pollEvents) await pollEvents();
+
     }
     return true;
   }
@@ -267,6 +271,13 @@ async function runGameLoop(admin, gameId, bots) {
     await pollEvents();
 
     const { data: game } = await admin.from('games').select('current_player_id, status, pending_type, turn_phase').eq('id', gameId).single();
+
+    if (game.status === 'preparing') {
+      try { await call('finish-preparation', bots[0].token, { gameId }); } catch {}
+      await sleep(1000);
+      continue;
+    }
+
     if (game.status === 'finished') { await pollEvents(); console.log('Partie terminée.'); return; }
 
     if (['bang_response', 'duel_response', 'indians_response', 'gatling_response', 'cat_balou_discard'].includes(game.pending_type)) {

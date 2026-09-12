@@ -2,7 +2,7 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 
-const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // sans O/0, I/1, L pour éviter les confusions à l'oral/écrit
+const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
 function generateCode(length = 6): string {
   let code = '';
@@ -29,11 +29,9 @@ serve(async (req) => {
       .from('games').insert({ status: 'lobby', join_code: joinCode }).select().single();
     if (gameError) throw gameError;
 
-    const { data: player, error: playerError } = await supabaseAdmin
-      .from('players').insert({ game_id: game.id, user_id: user.id, seat_position: 0 }).select().single();
-    if (playerError) throw playerError;
-
-    return new Response(JSON.stringify({ ok: true, gameId: game.id, joinCode, playerId: player.id }), {
+    // Plus d'insertion de joueur ici : le créateur rejoint sa propre partie via join-game,
+    // exactement comme n'importe qui d'autre — aucun siège n'est réservé à l'avance.
+    return new Response(JSON.stringify({ ok: true, gameId: game.id, joinCode }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   } catch (err) {

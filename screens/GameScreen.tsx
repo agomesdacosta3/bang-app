@@ -14,7 +14,7 @@ import PlayingCard from '../components/PlayingCard';
 type Game = {
   id: string; status: string; current_player_id: string | null; turn_phase: string | null;
   pending_type: string | null; pending_initiator_id: string | null; pending_expires_at: string | null;
-  pending_event_id: string | null; winner_team: string | null;
+  pending_event_id: string | null; turn_activity_at: string | null; winner_team: string | null;
 };
 type Player = SeatedPlayer & { is_sheriff: boolean; life_points: number; max_life_points: number; has_played_bang_this_turn: boolean; nickname: string | null };
 type HandCard = { id: string; card_type: string; suit: string; value: number };
@@ -75,7 +75,11 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const [selectedSidCards, setSelectedSidCards] = useState<string[]>([]);
   const [actionLoading, setActionLoading] = useState(false);
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
+  const [turnSecondsLeft, setTurnSecondsLeft] = useState<number | null>(null);
+  const [abandoning, setAbandoning] = useState(false);
+  const [forceLeaving, setForceLeaving] = useState(false);
   const firedTimeoutRef = useRef(false);
+  const firedTurnTimeoutRef = useRef(false);
   const actionLoadingRef = useRef(false);
   const historyScrollRef = useRef<ScrollView>(null);
 
@@ -297,6 +301,23 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   }, [game?.pending_expires_at, gameId]);
 
   useEffect(() => {
+    firedTurnTimeoutRef.current = false;
+    if (hasPending || !game?.turn_activity_at || game.status !== 'in_progress') { setTurnSecondsLeft(null); return; }
+    const deadline = new Date(game.turn_activity_at).getTime() + 60_000;
+    const tick = () => {
+      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      setTurnSecondsLeft(remaining);
+      if (remaining <= 0 && !firedTurnTimeoutRef.current) {
+        firedTurnTimeoutRef.current = true;
+        supabase.functions.invoke('check-turn-timeout', { body: { gameId } }).catch(() => {});
+      }
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [game?.turn_activity_at, hasPending, game?.status, gameId]);  
+
+  useEffect(() => {
     if (!(isMyTurn && game?.turn_phase === 'play')) {
       setDiscarding(false);
       setSelectedDiscards([]);
@@ -450,6 +471,44 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
       setSidKetchumMode(false);
       setSelectedSidCards([]);
     });
+  }
+  function handleAbandon() {
+    Alert.alert(
+      'Abandonner la partie',
+      'Tu seras éliminé immédiatement, comme si tu étais mort au combat. Cette action est irréversible.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Abandonner', style: 'destructive', onPress: () => {
+            setAbandoning(true);
+            runAction(() => callFunction('abandon-game', { gameId })).finally(() => setAbandoning(false));
+          },
+        },
+      ]
+    );
+  }
+
+  function handleForceLeave() {
+    Alert.alert(
+      'Quitter la partie',
+      'Tu reviens à l\u2019accueil. Si tu es encore en vie, on tentera de t\u2019éliminer proprement au passage — utile si la partie est bloquée.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Quitter', style: 'destructive', onPress: async () => {
+            setForceLeaving(true);
+            try {
+              if (!amDead) await callFunction('abandon-game', { gameId });
+            } catch {
+              // Best-effort : on quitte quand même, même si cet appel échoue.
+            } finally {
+              setForceLeaving(false);
+              onLeave();
+            }
+          },
+        },
+      ]
+    );
   }
 
   if (!game || !me) {
@@ -650,6 +709,10 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
           {waitingOnOthers && <Text style={styles.noticeBody}>{describePendingSituation()}</Text>}
         </ScrollView>
       </View>
+
+      {!hasPending && turnSecondsLeft !== null && turnSecondsLeft <= 20 && (
+        <Text style={styles.turnWarning}>⏱ {turnSecondsLeft}s avant un passage automatique</Text>
+      )}
 
       {!hasPending && (
         <Text style={styles.waitingText}>
@@ -909,6 +972,10 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
           </View>
         </View>
       </Modal>
+      {!amDead && (
+        <WoodButton title="Abandonner la partie" onPress={handleAbandon} disabled={abandoning} variant="muted" style={{ marginTop: 24 }} />
+      )}
+      <WoodButton title="Quitter la partie (retour à l'accueil)" onPress={handleForceLeave} disabled={forceLeaving} variant="muted" style={{ marginTop: 10 }} />
     </ScrollView>
   );
 }
@@ -948,6 +1015,7 @@ const styles = StyleSheet.create({
   noticeBtn: { marginTop: 4 },
   eventBold: { fontFamily: fonts.bodyBold },
   waitingText: { fontFamily: fonts.body, fontSize: 13, color: colors.leatherDark, marginTop: 4, fontStyle: 'italic' },
+  turnWarning: { fontFamily: fonts.bodyBold, fontSize: 12, color: colors.blood, marginTop: 4 },
   handRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, paddingVertical: 6 },
   fullWidthBtn: { marginTop: 10 },
   playerRow: {

@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { colors, fonts, characterLabels, renderPips } from '../theme';
+import { callFunction } from '../lib/functions';
 
 type PlayerRow = { id: string; seat_position: number; is_sheriff: boolean; life_points: number; max_life_points: number; nickname: string | null };
 
@@ -42,7 +43,10 @@ export default function GameStartScreen({ gameId, playerId, onReady }: { gameId:
 
   useEffect(() => {
     if (!loaded) return;
-    if (step >= STEP_DURATIONS.length) { onReady(); return; }
+    if (step >= STEP_DURATIONS.length) {
+      callFunction('finish-preparation', { gameId }).catch(() => {}).finally(onReady);
+      return;
+    }
     timerRef.current = setTimeout(() => setStep(s => s + 1), STEP_DURATIONS[step]);
     return () => { if (timerRef.current) clearTimeout(timerRef.current); };
   }, [step, loaded]);

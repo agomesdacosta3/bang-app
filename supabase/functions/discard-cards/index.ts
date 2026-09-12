@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { advanceTurn } from '../_shared/turn.ts';
 import { checkSuzyLafayette } from '../_shared/characters.ts';
+import { touchTurnActivity } from '../_shared/turnActivity.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -32,6 +33,7 @@ serve(async (req) => {
 
     await checkSuzyLafayette(gameId, me.id);
     const next = await advanceTurn(gameId, me.id);
+    await touchTurnActivity(gameId);
     return new Response(JSON.stringify({ ok: true, nextPlayerId: next.id }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {
     return new Response(JSON.stringify({ error: err.message }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

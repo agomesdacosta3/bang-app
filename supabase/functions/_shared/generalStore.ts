@@ -1,5 +1,6 @@
 import { supabaseAdmin } from './supabaseAdmin.ts';
 import { logEvent } from './events.ts';
+import { clearPending } from './pending.ts';
 
 export async function pickGeneralStoreCard(gameId: string, playerId: string, cardId?: string) {
   // Réservation atomique : si un autre appel concurrent (timeout, double-clic) a déjà
@@ -33,7 +34,7 @@ export async function pickGeneralStoreCard(gameId: string, playerId: string, car
 
   const { data: remaining } = await supabaseAdmin.from('pending_targets').select('*').eq('game_id', gameId).order('order_index');
   if (!remaining || remaining.length === 0) {
-    await supabaseAdmin.from('games').update({ pending_type: null, pending_initiator_id: null, pending_expires_at: null, pending_event_id: null }).eq('id', gameId);
+    await clearPending(gameId);
   } else {
     await supabaseAdmin.from('pending_targets').update({ is_current_turn: true }).eq('id', remaining[0].id);
     await supabaseAdmin.from('games').update({ pending_expires_at: new Date(Date.now() + 20_000).toISOString() }).eq('id', gameId);

@@ -4,6 +4,7 @@ import { corsHeaders } from '../_shared/cors.ts';
 import { drawFromDeck } from '../_shared/deck.ts';
 import { getCharacter } from '../_shared/characters.ts';
 import { logEvent } from '../_shared/events.ts';
+import { touchTurnActivity } from '../_shared/turnActivity.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -37,8 +38,9 @@ serve(async (req) => {
     }
 
     await supabaseAdmin.from('hand_cards').insert(drawn.map(c => ({ player_id: me.id, card_type: c.type, suit: c.suit, value: c.value })));
-    await supabaseAdmin.from('players').update({ has_played_bang_this_turn: false }).eq('id', me.id);
+    await supabaseAdmin.from('players').update({ has_played_bang_this_turn: false, consecutive_auto_passes: 0 }).eq('id', me.id);
     await supabaseAdmin.from('games').update({ turn_phase: 'play' }).eq('id', gameId);
+    await touchTurnActivity(gameId);
 
     return new Response(JSON.stringify({ ok: true, drawn: drawn.map(c => c.type) }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {

@@ -1,13 +1,12 @@
 // Crée une partie de test complète à partir d'un code, applique un scénario (rôle/personnage/main)
 // sur les sièges choisis, puis fait tourner la partie jusqu'à la fin.
 // Usage : 1) crée une partie depuis le téléphone, note le code
-//         2) édite RIG ci-dessous
+//         2) édite RIG et TOTAL_PLAYERS ci-dessous
 //         3) node scripts/rig-game.js CODE
 //
 // Depuis l'introduction du système "prêt", les bots doivent désormais choisir un pseudo et se
 // déclarer prêts comme le ferait un vrai joueur — la partie démarre automatiquement dès que TOI
-// (siège 0) te déclares prêt en dernier sur ton téléphone. Ce script ne peut pas déclarer le
-// siège 0 prêt à ta place.
+// (via ton téléphone) te déclares prêt en dernier.
 //
 // Seule limite : le rôle du siège qui est Shérif ne peut pas être changé.
 
@@ -20,9 +19,13 @@ if (!JOIN_CODE) {
   process.exit(1);
 }
 
+const TOTAL_PLAYERS = 4; // ajustable entre 4 et 7 — le script complète avec des bots jusqu'à ce total
+
 // Édite ici : seat_position -> { role?, character?, hand?, inPlay?, life?, forcedAction? }
 const RIG = {
-  
+  0: { character: 'bart_cassidy', hand: ['bang', 'bang'] },
+  1: { character: 'suzy_lafayette', role: 'outlaw' },
+  2: { character: 'jesse_jones' },
 };
 
 const BOT_NICKNAMES = ['Bandit1', 'Bandit2', 'Bandit3'];
@@ -46,12 +49,24 @@ function waitForGameStart(gameId) {
 async function run() {
   const bots = [];
   let gameId;
-  for (let i = 0; i < 3; i++) {
+
+  // Premier bot : résout le code et permet de connaître l'état réel actuel du lobby
+  const firstClient = createClient(LOCAL_URL, ANON_KEY, { auth: { persistSession: false } });
+  const { data: firstAuth, error: firstAuthError } = await firstClient.auth.signInAnonymously();
+  if (firstAuthError) throw firstAuthError;
+  const firstJoined = await call('join-game', firstAuth.session.access_token, { joinCode: JOIN_CODE });
+  gameId = firstJoined.gameId;
+  bots.push({ client: firstClient, token: firstAuth.session.access_token, playerId: firstJoined.playerId, seat: firstJoined.seatPosition });
+  console.log(`Bot rejoint — siège ${firstJoined.seatPosition}`);
+
+  const { data: currentPlayers } = await admin.from('players').select('id').eq('game_id', gameId);
+  const botsNeeded = Math.max(0, TOTAL_PLAYERS - (currentPlayers?.length ?? 1));
+
+  for (let i = 0; i < botsNeeded; i++) {
     const client = createClient(LOCAL_URL, ANON_KEY, { auth: { persistSession: false } });
     const { data, error } = await client.auth.signInAnonymously();
     if (error) throw error;
     const joined = await call('join-game', data.session.access_token, { joinCode: JOIN_CODE });
-    gameId = joined.gameId;
     bots.push({ client, token: data.session.access_token, playerId: joined.playerId, seat: joined.seatPosition });
     console.log(`Bot rejoint — siège ${joined.seatPosition}`);
   }

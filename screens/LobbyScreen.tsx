@@ -8,14 +8,15 @@ import WoodButton from '../components/WoodButton';
 type Player = { id: string; seat_position: number; is_ready: boolean; nickname: string | null };
 
 export default function LobbyScreen({
-  gameId, playerId, joinCode, onGameStarted,
+  gameId, playerId, joinCode, onGameStarted, onLeft,
 }: {
-  gameId: string; playerId: string; joinCode?: string; onGameStarted: () => void;
+  gameId: string; playerId: string; joinCode?: string; onGameStarted: () => void; onLeft: () => void;
 }) {
   const [players, setPlayers] = useState<Player[]>([]);
   const [nicknameInput, setNicknameInput] = useState('');
   const [savingNickname, setSavingNickname] = useState(false);
   const [togglingReady, setTogglingReady] = useState(false);
+  const [leaving, setLeaving] = useState(false);
 
   const me = players.find(p => p.id === playerId);
 
@@ -29,7 +30,7 @@ export default function LobbyScreen({
 
     async function checkAlreadyStarted() {
       const { data } = await supabase.from('games').select('status').eq('id', gameId).single();
-      if (active && data?.status === 'in_progress') onGameStarted();
+      if (active && (data?.status === 'preparing' || data?.status === 'in_progress')) onGameStarted();
     }
 
     loadPlayers();
@@ -39,7 +40,7 @@ export default function LobbyScreen({
       .channel(`lobby-${gameId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'players', filter: `game_id=eq.${gameId}` }, loadPlayers)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `id=eq.${gameId}` }, (payload: any) => {
-        if (payload.new.status === 'in_progress') onGameStarted();
+        if (payload.new.status === 'preparing' || payload.new.status === 'in_progress') onGameStarted();
       })
       .subscribe();
 
@@ -71,6 +72,25 @@ export default function LobbyScreen({
     } finally {
       setTogglingReady(false);
     }
+  }
+
+  function handleLeave() {
+    Alert.alert('Quitter la partie', 'Es-tu sûr de vouloir quitter cette salle d\u2019attente ?', [
+      { text: 'Annuler', style: 'cancel' },
+      {
+        text: 'Quitter', style: 'destructive', onPress: async () => {
+          setLeaving(true);
+          try {
+            await callFunction('leave-lobby', { gameId });
+            onLeft();
+          } catch (err: any) {
+            Alert.alert('Erreur', err.message ?? String(err));
+          } finally {
+            setLeaving(false);
+          }
+        },
+      },
+    ]);
   }
 
   return (
@@ -121,6 +141,8 @@ export default function LobbyScreen({
         />
         {!me?.nickname && <Text style={styles.hint}>Choisis un pseudo avant de pouvoir te déclarer prêt.</Text>}
         <Text style={styles.hint}>La partie démarre automatiquement dès que tout le monde (4 à 7 joueurs) est prêt.</Text>
+
+        <WoodButton title="Quitter la partie" onPress={handleLeave} disabled={leaving} variant="muted" style={styles.button} />
       </View>
     </KeyboardAvoidingView>
   );

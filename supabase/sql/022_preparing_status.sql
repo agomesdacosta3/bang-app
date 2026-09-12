@@ -1,0 +1,1 @@
+alter type game_status add value 'preparing' after 'lobby';

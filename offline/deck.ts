@@ -1,28 +1,8 @@
-import { supabaseAdmin } from './supabaseAdmin.ts';
+import { DeckCard } from './types';
+import { shuffle } from './utils';
 
-const ROLE_SETUP: Record<number, { outlaws: number; deputies: number }> = {
-  4: { outlaws: 2, deputies: 0 }, 5: { outlaws: 2, deputies: 1 },
-  6: { outlaws: 3, deputies: 1 }, 7: { outlaws: 3, deputies: 2 },
-};
-
-const ALL_CHARACTERS = [
-  'bart_cassidy', 'black_jack', 'calamity_janet', 'el_gringo', 'jesse_jones',
-  'jourdonnais', 'kit_carlson', 'lucky_duke', 'paul_regret', 'pedro_ramirez',
-  'rose_doolan', 'sid_ketchum', 'slab_the_killer', 'suzy_lafayette', 'vulture_sam', 'willy_the_kid',
-];
-const CHARACTER_BASE_LIFE: Record<string, number> = { paul_regret: 3, el_gringo: 3 };
-
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-function buildDeck(): { type: string; suit: string; value: number }[] {
-  const deck: { type: string; suit: string; value: number }[] = [
+export function buildDeck(): DeckCard[] {
+  const deck: DeckCard[] = [
     { type: 'missed', suit: 'spades', value: 2 }, { type: 'missed', suit: 'spades', value: 3 },
     { type: 'missed', suit: 'spades', value: 4 }, { type: 'missed', suit: 'spades', value: 5 },
     { type: 'missed', suit: 'spades', value: 6 }, { type: 'missed', suit: 'spades', value: 7 },
@@ -68,58 +48,4 @@ function buildDeck(): { type: string; suit: string; value: number }[] {
     { type: 'volcanic', suit: 'spades', value: 10 }, { type: 'volcanic', suit: 'clubs', value: 10 },
   ];
   return shuffle(deck);
-}
-
-export async function runStartGame(gameId: string) {
-  const { data: game } = await supabaseAdmin.from('games').select('*').eq('id', gameId).single();
-  if (!game) throw new Error('Partie introuvable');
-  if (game.status !== 'lobby') throw new Error('La partie a déjà démarré');
-
-  const { data: players } = await supabaseAdmin.from('players').select('*').eq('game_id', gameId).order('seat_position');
-  if (!players || !ROLE_SETUP[players.length]) throw new Error('Il faut entre 4 et 7 joueurs pour démarrer');
-
-  const { outlaws, deputies } = ROLE_SETUP[players.length];
-  const shuffledPlayers = shuffle(players);
-  const sheriff = shuffledPlayers[0];
-  const renegade = shuffledPlayers[1];
-  const outlawPlayers = shuffledPlayers.slice(2, 2 + outlaws);
-  const deputyPlayers = shuffledPlayers.slice(2 + outlaws, 2 + outlaws + deputies);
-
-  await supabaseAdmin.from('player_roles').insert([
-    { player_id: renegade.id, role: 'renegade' },
-    ...outlawPlayers.map(p => ({ player_id: p.id, role: 'outlaw' })),
-    ...deputyPlayers.map(p => ({ player_id: p.id, role: 'deputy' })),
-  ]);
-
-  const shuffledCharacters = shuffle(ALL_CHARACTERS).slice(0, players.length);
-  const characterByPlayer = new Map(players.map((p, i) => [p.id, shuffledCharacters[i]]));
-
-  await supabaseAdmin.from('player_characters').insert(
-    players.map(p => ({ player_id: p.id, character: characterByPlayer.get(p.id) }))
-  );
-
-  let deck = buildDeck();
-  const handInserts: { player_id: string; card_type: string; suit: string; value: number }[] = [];
-
-  for (const p of players) {
-    const character = characterByPlayer.get(p.id)!;
-    const base = CHARACTER_BASE_LIFE[character] ?? 4;
-    const life = base + (p.id === sheriff.id ? 1 : 0);
-
-    await supabaseAdmin.from('players').update({
-      is_sheriff: p.id === sheriff.id, life_points: life, max_life_points: life,
-    }).eq('id', p.id);
-
-    const dealt = deck.slice(-life);
-    deck = deck.slice(0, -life);
-    handInserts.push(...dealt.map(c => ({ player_id: p.id, card_type: c.type, suit: c.suit, value: c.value })));
-  }
-
-  await supabaseAdmin.from('hand_cards').insert(handInserts);
-  await supabaseAdmin.from('deck_state').insert({ game_id: gameId, cards: deck });
-
-  await supabaseAdmin.from('games').update({
-    status: 'preparing', current_player_id: sheriff.id, turn_phase: 'draw', deck_remaining: deck.length,
-    turn_activity_at: new Date().toISOString(),
-  }).eq('id', gameId);
 }

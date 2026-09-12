@@ -752,3 +752,47 @@ entrypoint = "./functions/set-nickname/index.ts"
 # Specifies static files to be bundled with the function. Supports glob patterns.
 # For example, if you want to serve static HTML pages in your function:
 # static_files = [ "./functions/set-nickname/*.html" ]
+
+[functions.check-turn-timeout]
+enabled = true
+verify_jwt = false
+import_map = "./functions/check-turn-timeout/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/check-turn-timeout/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/check-turn-timeout/*.html" ]
+
+[functions.abandon-game]
+enabled = true
+verify_jwt = false
+import_map = "./functions/abandon-game/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/abandon-game/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/abandon-game/*.html" ]
+
+[functions.leave-lobby]
+enabled = true
+verify_jwt = false
+import_map = "./functions/leave-lobby/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/leave-lobby/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/leave-lobby/*.html" ]
+
+[functions.finish-preparation]
+enabled = true
+verify_jwt = false
+import_map = "./functions/finish-preparation/deno.json"
+# Uncomment to specify a custom file path to the entrypoint.
+# Supported file extensions are: .ts, .js, .mjs, .jsx, .tsx
+entrypoint = "./functions/finish-preparation/index.ts"
+# Specifies static files to be bundled with the function. Supports glob patterns.
+# For example, if you want to serve static HTML pages in your function:
+# static_files = [ "./functions/finish-preparation/*.html" ]

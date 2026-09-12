@@ -23,5 +23,6 @@ export async function clearPending(gameId: string) {
   await supabaseAdmin.from('pending_targets').delete().eq('game_id', gameId);
   await supabaseAdmin.from('games').update({
     pending_type: null, pending_initiator_id: null, pending_expires_at: null, pending_event_id: null,
+    turn_activity_at: new Date().toISOString(),
   }).eq('id', gameId);
 }

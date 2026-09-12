@@ -1,2 +1,1 @@
-alter table players add column is_ready boolean not null default false;
-alter table players add column nickname text;
+select * from games order by created_at desc limit 3;
