@@ -10,6 +10,7 @@ export interface OfflinePlayer {
   seatPosition: number;
   isBot: boolean;
   nickname: string;
+  character: string;
   role: RoleName;
   isSheriff: boolean;
   isAlive: boolean;

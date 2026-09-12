@@ -1,9 +1,9 @@
 import { useEffect, useState, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView } from 'react-native';
 import { OfflineEngine } from '../offline/engine';
-import { colors, fonts, renderPips } from '../theme';
+import { colors, fonts, characterLabels, renderPips } from '../theme';
 
-const STEP_DURATIONS = [4000, 4000, 4000, 2500];
+const STEP_DURATIONS = [4000, 4000, 4000, 4000, 2500];
 
 export default function OfflineGameStartScreen({ engine, onReady }: { engine: OfflineEngine; onReady: () => void }) {
   const [step, setStep] = useState(0);
@@ -11,6 +11,10 @@ export default function OfflineGameStartScreen({ engine, onReady }: { engine: Of
   const scrollRef = useRef<ScrollView>(null);
   const state = engine.getState();
   const sheriff = state.players.find(p => p.isSheriff)!;
+
+  function displayName(p: typeof state.players[number]): string {
+    return `${characterLabels[p.character] ?? '...'} (${p.nickname})`;
+  }
 
   useEffect(() => {
     if (step >= STEP_DURATIONS.length) { onReady(); return; }
@@ -30,34 +34,43 @@ export default function OfflineGameStartScreen({ engine, onReady }: { engine: Of
         {step >= 0 && (
           <View style={styles.block}>
             <Text style={styles.stepTitle}>Répartition des rôles</Text>
-            <Text style={styles.highlight}>★ Le Shérif est {sheriff.nickname}</Text>
+            <Text style={styles.highlight}>★ Le Shérif est {displayName(sheriff)}</Text>
             <Text style={styles.bodyText}>Les autres rôles (Adjoint, Hors-la-loi, Renégat) resteront secrets jusqu'à leur révélation en jeu.</Text>
           </View>
         )}
 
         {step >= 1 && (
           <View style={styles.block}>
-            <Text style={styles.stepTitle}>Distribution des cartes</Text>
+            <Text style={styles.stepTitle}>Découverte des personnages</Text>
             {state.players.map(p => (
-              <Text key={p.id} style={styles.listLine}>{p.nickname} : {state.hands[p.id]?.length ?? 0} carte(s)</Text>
+              <Text key={p.id} style={styles.listLine}>{displayName(p)}</Text>
             ))}
           </View>
         )}
 
         {step >= 2 && (
           <View style={styles.block}>
-            <Text style={styles.stepTitle}>Distribution des points de vie</Text>
-            {state.players.map(p => {
-              const baseLife = p.isSheriff ? p.maxLifePoints - 1 : p.maxLifePoints;
-              return <Text key={p.id} style={styles.listLine}>{p.nickname} : {renderPips(baseLife, baseLife)}</Text>;
-            })}
+            <Text style={styles.stepTitle}>Distribution des cartes</Text>
+            {state.players.map(p => (
+              <Text key={p.id} style={styles.listLine}>{displayName(p)} : {state.hands[p.id]?.length ?? 0} carte(s)</Text>
+            ))}
           </View>
         )}
 
         {step >= 3 && (
           <View style={styles.block}>
+            <Text style={styles.stepTitle}>Distribution des points de vie</Text>
+            {state.players.map(p => {
+              const baseLife = p.isSheriff ? p.maxLifePoints - 1 : p.maxLifePoints;
+              return <Text key={p.id} style={styles.listLine}>{displayName(p)} : {renderPips(baseLife, baseLife)}</Text>;
+            })}
+          </View>
+        )}
+
+        {step >= 4 && (
+          <View style={styles.block}>
             <Text style={styles.stepTitle}>Prime du Shérif</Text>
-            <Text style={styles.highlight}>{sheriff.nickname} reçoit 1 point de vie supplémentaire !</Text>
+            <Text style={styles.highlight}>{displayName(sheriff)} reçoit 1 point de vie supplémentaire !</Text>
             <Text style={styles.pipsLarge}>{renderPips(sheriff.maxLifePoints, sheriff.maxLifePoints)}</Text>
             <Text style={styles.stepTitle}>En selle, la partie commence !</Text>
           </View>
