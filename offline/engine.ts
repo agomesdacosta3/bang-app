@@ -76,6 +76,7 @@ export class OfflineEngine {
       pending: null,
       events: [],
       winnerTeam: null,
+      killedBy: {}
     };
 
     return new OfflineEngine(state);
@@ -249,6 +250,8 @@ export class OfflineEngine {
 
     if (eliminated) {
       p.isAlive = false;
+      this.state.killedBy[playerId] = causedByPlayerId ?? null;
+      console.log(`[IA] ${p.nickname} est éliminé — rôle révélé : ${p.role}${causedByPlayerId ? ` (tué par ${this.player(causedByPlayerId).nickname})` : ''}`);
       const handCards = this.hand(playerId);
       const equipCards = this.equip(playerId);
       const sam = this.state.players.find(o => o.isAlive && o.id !== playerId && o.character === 'vulture_sam');

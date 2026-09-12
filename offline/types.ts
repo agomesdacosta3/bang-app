@@ -63,4 +63,5 @@ export interface OfflineGameState {
   pending: PendingState | null;
   events: GameEvent[];
   winnerTeam: WinnerTeam | null;
+  killedBy: Record<string, string | null>;
 }
