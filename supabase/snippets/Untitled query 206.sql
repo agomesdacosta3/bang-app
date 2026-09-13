@@ -1,1 +1,0 @@
-select id, card_type from hand_cards where player_id = '9ad573b2-346c-44a4-b5aa-6376fbacdd0a' limit 100;

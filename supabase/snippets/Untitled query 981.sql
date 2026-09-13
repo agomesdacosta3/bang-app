@@ -1,1 +1,0 @@
-truncate table games, players, player_roles, hand_cards, discard_pile, cards_in_play, pending_targets, general_store_cards, deck_state cascade;
