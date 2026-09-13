@@ -557,7 +557,7 @@ export class OfflineEngine {
       target.barrelTriesUsed += 1;
       const drawn = this.degainer(playerId, threadId, c => c.suit === 'hearts');
       if (drawn.suit !== 'hearts') {
-        this.logEvent('barrel_failed', { actorSeat: me.seatPosition, threadId });
+        this.logEvent('barrel_failed', { actorSeat: me.seatPosition, threadId, drawnSuit: drawn.suit, drawnValue: drawn.value });
         return;
       }
       this.logEvent('barrel_used', { actorSeat: me.seatPosition, threadId });
@@ -708,7 +708,7 @@ export class OfflineEngine {
       const idx = targetEquip.findIndex(c => c.type === cardType);
       if (idx === -1) throw new Error('Ce joueur n’a pas cette carte en jeu');
       const [stolen] = targetEquip.splice(idx, 1);
-      this.state.equipment[playerId] = [...this.equip(playerId), stolen];
+      this.state.hands[playerId] = [...this.hand(playerId), stolen];
       stolenType = stolen.type;
     }
 
@@ -833,6 +833,8 @@ export class OfflineEngine {
 
   playSaloon(playerId: string) {
     this.assertOwnTurnPlayPhase(playerId);
+    const anyoneInjured = this.alivePlayers().some(p => p.lifePoints < p.maxLifePoints);
+    if (!anyoneInjured) throw new Error('Tout le monde est déjà au maximum de points de vie');
     const card = this.findHandCardByType(playerId, 'saloon');
     this.removeFromHand(playerId, card.id);
     this.state.discardPile.push(card);

@@ -10,6 +10,30 @@ import PlayingCard from '../components/PlayingCard';
 
 type Player = OfflineGameState['players'][number];
 
+type OfflineEventItem = OfflineGameState['events'][number];
+
+function isRootEvent(e: OfflineEventItem) { return e.threadId === e.id; }
+
+function groupEventsForDisplay(events: OfflineEventItem[], maxGroups = 10): OfflineEventItem[] {
+  const byThread = new Map<string, OfflineEventItem[]>();
+  for (const e of events) {
+    const key = e.threadId ?? e.id;
+    if (!byThread.has(key)) byThread.set(key, []);
+    byThread.get(key)!.push(e);
+  }
+  const groups = Array.from(byThread.values()).map(evs => {
+    const sorted = [...evs].sort((a, b) => {
+      if (isRootEvent(a) && !isRootEvent(b)) return -1;
+      if (!isRootEvent(a) && isRootEvent(b)) return 1;
+      return a.createdAt - b.createdAt;
+    });
+    const lastTime = sorted.reduce((max, e) => Math.max(max, e.createdAt), 0);
+    return { sorted, lastTime };
+  });
+  groups.sort((a, b) => a.lastTime - b.lastTime);
+  return groups.slice(-maxGroups).flatMap(g => g.sorted);
+}
+
 function NoticeBox({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <View style={styles.notice}>
@@ -21,6 +45,7 @@ function NoticeBox({ title, children }: { title: string; children: React.ReactNo
 
 export default function OfflineGameScreen({ engine, onLeave }: { engine: OfflineEngine; onLeave: () => void }) {
   const engineRef = useRef<OfflineEngine>(engine);
+  const botTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [state, setState] = useState<OfflineGameState>(engineRef.current.getState());
   const [targetPickerFor, setTargetPickerFor] = useState<string | null>(null);
   const [bangSourceType, setBangSourceType] = useState<'bang' | 'missed'>('bang');
@@ -61,10 +86,12 @@ export default function OfflineGameScreen({ engine, onLeave }: { engine: Offline
   }
 
   useEffect(() => {
-    const timer = setInterval(() => {
+    let cancelled = false;
+
+    function runOneStep() {
       try {
         const s = engineRef.current.getState();
-        if (s.status === 'finished') { clearInterval(timer); refresh(); return; }
+        if (s.status === 'finished') { refresh(); return; }
 
         if (s.pending) {
           const pending = s.pending;
@@ -87,67 +114,77 @@ export default function OfflineGameScreen({ engine, onLeave }: { engine: Offline
             const botTarget = pending.targets.map(t => s.players.find(p => p.id === t.playerId)).find(p => p?.isBot);
             if (botTarget) { aiRespondSingleAttack(engineRef.current, pending.type as any, botTarget.id); refresh(); }
           }
-          return;
-        }
-
-        const current = s.players.find(p => p.id === s.currentPlayerId);
-        if (current?.isBot && current.isAlive) {
-          aiPlayFullTurn(engineRef.current, current.id);
-          refresh();
+        } else {
+          const current = s.players.find(p => p.id === s.currentPlayerId);
+          if (current?.isBot && current.isAlive) {
+            aiPlayFullTurn(engineRef.current, current.id);
+            refresh();
+          }
         }
       } catch (err) {
         console.log('Erreur IA (ignorée, nouvel essai au prochain tick) :', err);
       }
-    }, 1200);
-    return () => clearInterval(timer);
+
+      if (!cancelled && engineRef.current.getState().status !== 'finished') {
+        const delay = 2000 + Math.random() * 2000; // entre 2 et 4 secondes
+        botTimeoutRef.current = setTimeout(runOneStep, delay);
+      }
+    }
+
+    botTimeoutRef.current = setTimeout(runOneStep, 2000 + Math.random() * 2000);
+    return () => { cancelled = true; if (botTimeoutRef.current) clearTimeout(botTimeoutRef.current); };
   }, []);
 
-  function describeEvent(e: OfflineGameState['events'][number]): string {
-    const actor = nameForSeat(e.actorSeat);
-    const target = nameForSeat(e.targetSeat);
-    const c = (t: string | null) => cardLabels[t ?? ''] ?? t;
+  function Bold({ children }: { children: React.ReactNode }) {
+    return <Text style={styles.eventBold}>{children}</Text>;
+  }
+
+  function renderEventLine(e: OfflineEventItem): React.ReactNode {
+    const actor = <Bold>{nameForSeat(e.actorSeat)}</Bold>;
+    const target = <Bold>{nameForSeat(e.targetSeat)}</Bold>;
+    const card = (t: string | null) => <Bold>{cardLabels[t ?? ''] ?? t}</Bold>;
     switch (e.eventType) {
-      case 'bang_played': return `${actor} tire sur ${target}`;
-      case 'missed_played': return `${actor} esquive avec Raté!`;
-      case 'barrel_equipped': return `${actor} pose une Planque`;
-      case 'barrel_used': return `${actor} esquive avec la Planque !`;
-      case 'barrel_failed': return `${actor} rate son dégainer de Planque`;
-      case 'damage_taken': return `${actor} perd ${e.amount ?? 1} point(s) de vie`;
-      case 'player_eliminated': return `${actor} est éliminé !`;
-      case 'store_card_taken': return `${actor} récupère ${c(e.cardType)} au Magasin`;
-      case 'card_discarded_forced': return `${actor} défausse ${c(e.cardType)} (Coup de foudre)`;
-      case 'beer_played': return `${actor} boit une Bière`;
-      case 'saloon_played': return `${actor} joue Saloon, tout le monde est soigné`;
-      case 'stagecoach_played': return `${actor} joue Diligence`;
-      case 'wellsfargo_played': return `${actor} joue Convoi`;
-      case 'duel_played': return `${actor} lance un Duel contre ${target}`;
-      case 'duel_bang_discarded': return `${actor} continue le Duel avec un Bang!`;
-      case 'indians_played': return `${actor} joue Indiens!`;
-      case 'indians_defended': return `${actor} se défend avec Bang!`;
-      case 'gatling_played': return `${actor} joue Gatling !`;
-      case 'prison_played': return `${actor} met ${target} en Prison`;
-      case 'prison_failed': return `${actor} rate son dégainer de Prison, tour passé`;
-      case 'prison_escaped': return `${actor} s'échappe de Prison`;
-      case 'dynamite_played': return `${actor} pose une Dynamite`;
-      case 'dynamite_passed': return `La Dynamite passe à ${actor}`;
-      case 'weapon_equipped': return `${actor} s'équipe : ${c(e.cardType)}`;
-      case 'mustang_equipped': return `${actor} pose un Mustang`;
-      case 'scope_equipped': return `${actor} pose une Lunette`;
-      case 'panic_played': return `${actor} vole ${c(e.cardType)} à ${target}`;
-      case 'catbalou_played': return `${actor} joue Coup de foudre sur ${target}`;
-      case 'general_store_played': return `${actor} joue Magasin`;
-      case 'jesse_jones_steal': return `${actor} pioche dans la main de ${target}`;
-      case 'pedro_ramirez_discard_draw': return `${actor} pioche depuis la défausse`;
-      case 'kit_carlson_pick': return `${actor} choisit 2 cartes parmi 3`;
-      case 'bart_cassidy_draw': return `${actor} pioche une carte`;
-      case 'suzy_lafayette_draw': return `${actor} pioche une carte, main vide`;
-      case 'black_jack_bonus_draw': return `${actor} pioche une carte de plus`;
-      case 'el_gringo_steal': return `${actor} vole ${e.amount} carte(s) à ${target}`;
-      case 'vulture_sam_loot': return `${actor} récupère les cartes de ${target}`;
-      case 'sid_ketchum_heal': return `${actor} défausse 2 cartes, +1 PV`;
-      case 'beer_saved_from_death': return `${actor} survit grâce à une Bière !`;
-      case 'degainer_draw': return `${actor} dégaine`;
-      default: return `${actor} — ${e.eventType}`;
+      case 'bang_played': return <>{actor} tire sur {target}</>;
+      case 'missed_played': return <>{actor} esquive avec {card('missed')}</>;
+      case 'barrel_equipped': return <>{actor} pose une {card('barrel')}</>;
+      case 'barrel_used': return <>{actor} esquive avec la {card('barrel')} !</>;
+      case 'barrel_failed': return <>{actor} rate son dégainer de {card('barrel')}</>;
+      case 'damage_taken': return <>{actor} perd {e.amount ?? 1} point(s) de vie</>;
+      case 'player_eliminated': return <>{actor} est éliminé !</>;
+      case 'store_card_taken': return <>{actor} récupère {card(e.cardType)} au Magasin</>;
+      case 'card_discarded_forced': return <>{actor} défausse {card(e.cardType)} (Coup de foudre)</>;
+      case 'beer_played': return <>{actor} boit une {card('beer')}</>;
+      case 'saloon_played': return <>{actor} joue {card('saloon')}, tout le monde est soigné</>;
+      case 'stagecoach_played': return <>{actor} joue {card('stagecoach')}</>;
+      case 'wellsfargo_played': return <>{actor} joue {card('wells_fargo')}</>;
+      case 'duel_played': return <>{actor} lance un {card('duel')} contre {target}</>;
+      case 'duel_bang_discarded': return <>{actor} continue le Duel avec un {card('bang')}</>;
+      case 'indians_played': return <>{actor} joue {card('indians')}</>;
+      case 'indians_defended': return <>{actor} se défend avec un {card('bang')}</>;
+      case 'gatling_played': return <>{actor} joue {card('gatling')} !</>;
+      case 'prison_played': return <>{actor} met {target} en {card('prison')}</>;
+      case 'prison_failed': return <>{actor} rate son dégainer de {card('prison')}, tour passé</>;
+      case 'prison_escaped': return <>{actor} s'échappe de {card('prison')}</>;
+      case 'dynamite_played': return <>{actor} pose une {card('dynamite')}</>;
+      case 'dynamite_passed': return <>La {card('dynamite')} passe à {actor}</>;
+      case 'weapon_equipped': return <>{actor} s'équipe : {card(e.cardType)}</>;
+      case 'mustang_equipped': return <>{actor} pose un {card('mustang')}</>;
+      case 'scope_equipped': return <>{actor} pose une {card('scope')}</>;
+      case 'panic_played': return <>{actor} vole {card(e.cardType)} à {target}</>;
+      case 'catbalou_played': return <>{actor} joue {card('cat_balou')} sur {target}</>;
+      case 'general_store_played': return <>{actor} joue {card('general_store')}</>;
+      case 'jesse_jones_steal': return <>{actor} pioche dans la main de {target}</>;
+      case 'pedro_ramirez_discard_draw': return <>{actor} pioche depuis la défausse</>;
+      case 'kit_carlson_pick': return <>{actor} choisit 2 cartes parmi 3</>;
+      case 'bart_cassidy_draw': return <>{actor} pioche une carte</>;
+      case 'suzy_lafayette_draw': return <>{actor} pioche une carte, main vide</>;
+      case 'black_jack_bonus_draw': return <>{actor} pioche une carte de plus</>;
+      case 'el_gringo_steal': return <>{actor} vole {e.amount} carte(s) à {target}</>;
+      case 'vulture_sam_loot': return <>{actor} récupère les cartes de {target}</>;
+      case 'sid_ketchum_heal': return <>{actor} défausse 2 cartes, +1 PV</>;
+      case 'beer_saved_from_death': return <>{actor} survit grâce à une {card('beer')} !</>;
+      case 'degainer_draw': return <>{actor} dégaine</>;
+      default: return <>{actor} — {e.eventType}</>;
     }
   }
 
@@ -226,6 +263,7 @@ export default function OfflineGameScreen({ engine, onLeave }: { engine: Offline
   const panicTargets = panicRangeTargets.filter(t => hasAnyCards(t.id));
   const catBalouTargets = duelTargets.filter(t => hasAnyCards(t.id));
   const jesseTargets = state.players.filter(p => p.isAlive && p.id !== humanId && (state.hands[p.id]?.length ?? 0) > 0);
+  const equipmentTagsLegend = Object.entries(equipmentTags).map(([type, icon]) => `${icon} ${cardLabels[type] ?? type}`);
 
   const canPlayBang = canAct && bangTargets.length > 0 && (hasVolcanic || isWillyTheKid || !me.hasPlayedBangThisTurn);
   const canPlayBeer = canAct && aliveCount > 2 && me.lifePoints < me.maxLifePoints;
@@ -315,7 +353,15 @@ export default function OfflineGameScreen({ engine, onLeave }: { engine: Offline
       <Text style={styles.sectionTitle}>Actions récentes</Text>
       <View style={styles.historyBox}>
         <ScrollView nestedScrollEnabled>
-          {state.events.slice(-20).map(e => <Text key={e.id} style={styles.noticeBody}>• {describeEvent(e)}</Text>)}
+          {groupEventsForDisplay(state.events).map(e => {
+            const isChild = !isRootEvent(e);
+            const isActiveThread = !!state.pending?.eventId && e.threadId === state.pending.eventId;
+            return (
+              <Text key={e.id} style={[styles.noticeBody, isChild && styles.noticeBodyChild, isActiveThread && styles.noticeBodyActive]}>
+                {isChild ? '↳ ' : '• '}{renderEventLine(e)}
+              </Text>
+            );
+          })}
         </ScrollView>
       </View>
 
@@ -520,6 +566,10 @@ export default function OfflineGameScreen({ engine, onLeave }: { engine: Offline
         );
       })}
 
+      {equipmentTagsLegend.length > 0 && (
+        <Text style={styles.equipmentLegend}>{equipmentTagsLegend.join('  ·  ')}</Text>
+      )}
+
       <Text style={styles.sectionTitle}>Haut de la défausse</Text>
       <View style={styles.discardRow}>
         {state.discardPile.length === 0 && <Text style={styles.hint}>Vide</Text>}
@@ -630,6 +680,9 @@ const styles = StyleSheet.create({
   noticeTitle: { fontFamily: fonts.display, fontSize: 14, color: colors.blood },
   confrontationScroll: { height: 320, marginTop: 2 },
   noticeBody: { fontFamily: fonts.body, fontSize: 13, color: colors.ink, lineHeight: 18 },
+  noticeBodyChild: { marginLeft: 18, color: colors.leatherDark },
+  noticeBodyActive: { color: colors.brass },
+  eventBold: { fontFamily: fonts.bodyBold },  
   noticeMeta: { fontFamily: fonts.body, fontSize: 12, color: colors.leatherDark, fontStyle: 'italic' },
   noticeBtn: { marginTop: 4 },
   waitingText: { fontFamily: fonts.body, fontSize: 13, color: colors.leatherDark, marginTop: 4, fontStyle: 'italic' },
@@ -645,6 +698,7 @@ const styles = StyleSheet.create({
   playerNameDead: { textDecorationLine: 'line-through', color: colors.leatherDark },
   playerMeta: { fontFamily: fonts.body, fontSize: 12, color: colors.leatherDark, marginTop: 1 },
   playerEquipment: { fontFamily: fonts.body, fontSize: 13, marginTop: 2 },
+  equipmentLegend: { fontFamily: fonts.body, fontSize: 11, color: colors.leatherDark, marginTop: 8, fontStyle: 'italic' },
   discardRow: { flexDirection: 'row', gap: 16, paddingVertical: 6, paddingLeft: 4 },
   discardItem: { alignItems: 'center', gap: 3 },
   discardLatestLabel: { fontFamily: fonts.bodyBold, fontSize: 10, color: colors.brass },

@@ -62,7 +62,14 @@ export default function OfflineGameStartScreen({ engine, onReady }: { engine: Of
             <Text style={styles.stepTitle}>Distribution des points de vie</Text>
             {state.players.map(p => {
               const baseLife = p.isSheriff ? p.maxLifePoints - 1 : p.maxLifePoints;
-              return <Text key={p.id} style={styles.listLine}>{displayName(p)} : {renderPips(baseLife, baseLife)}</Text>;
+              const showBonus = p.isSheriff && step >= 4;
+              return (
+                <Text key={p.id} style={styles.listLine}>
+                  {displayName(p)} :{' '}
+                  <Text>{renderPips(baseLife, baseLife)}</Text>
+                  {showBonus && <Text style={styles.bonusPip}>●</Text>}
+                </Text>
+              );
             })}
           </View>
         )}
@@ -71,7 +78,6 @@ export default function OfflineGameStartScreen({ engine, onReady }: { engine: Of
           <View style={styles.block}>
             <Text style={styles.stepTitle}>Prime du Shérif</Text>
             <Text style={styles.highlight}>{displayName(sheriff)} reçoit 1 point de vie supplémentaire !</Text>
-            <Text style={styles.pipsLarge}>{renderPips(sheriff.maxLifePoints, sheriff.maxLifePoints)}</Text>
             <Text style={styles.stepTitle}>En selle, la partie commence !</Text>
           </View>
         )}
@@ -93,5 +99,6 @@ const styles = StyleSheet.create({
   bodyText: { fontFamily: fonts.body, fontSize: 13, color: colors.ink, textAlign: 'center' },
   listLine: { fontFamily: fonts.body, fontSize: 14, color: colors.ink, marginVertical: 2, textAlign: 'center' },
   pipsLarge: { fontFamily: fonts.body, fontSize: 22, color: colors.brass, letterSpacing: 3, marginTop: 4 },
+  bonusPip: { color: colors.brass, fontFamily: fonts.bodyBold },
   stepCounter: { fontFamily: fonts.body, fontSize: 12, color: colors.leatherDark, marginTop: 8 },
 });
