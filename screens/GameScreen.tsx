@@ -10,6 +10,8 @@ import {
 } from '../theme';
 import WoodButton from '../components/WoodButton';
 import PlayingCard from '../components/PlayingCard';
+import AbilityAnimationOverlay, { AbilityAnimationType } from '../components/AbilityAnimationOverlay';
+import { useAbilityAnimationQueue } from '../hooks/useAbilityAnimationQueue';
 
 type Game = {
   id: string; status: string; current_player_id: string | null; turn_phase: string | null;
@@ -82,6 +84,8 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const firedTurnTimeoutRef = useRef(false);
   const actionLoadingRef = useRef(false);
   const historyScrollRef = useRef<ScrollView>(null);
+  const abilityQueue = useAbilityAnimationQueue();
+  const seenAbilityEventIds = useRef<Set<string> | null>(null);
 
   const me = players.find(p => p.id === playerId);
   const isMyTurn = game?.current_player_id === playerId;
@@ -323,6 +327,25 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
       setSelectedDiscards([]);
     }
   }, [isMyTurn, game?.turn_phase]);
+
+useEffect(() => {
+  const abilityTypes: AbilityAnimationType[] = ['bart_cassidy_draw', 'el_gringo_steal', 'sid_ketchum_heal', 'vulture_sam_loot'];
+
+  // Premier passage : on mémorise ce qui existe déjà (reconnexion en cours de partie)
+  // sans rejouer d'animation pour des capacités déjà anciennes.
+  if (seenAbilityEventIds.current === null) {
+    seenAbilityEventIds.current = new Set(events.map(e => e.id));
+    return;
+  }
+
+  for (const e of events) {
+    if (seenAbilityEventIds.current.has(e.id)) continue;
+    seenAbilityEventIds.current.add(e.id);
+    if (abilityTypes.includes(e.event_type as AbilityAnimationType)) {
+      abilityQueue.enqueue(e.event_type as AbilityAnimationType, nameForSeat(e.actor_seat), e.target_seat != null ? nameForSeat(e.target_seat) : undefined);
+    }
+  }
+}, [events]);
 
   async function runAction(action: () => Promise<void>) {
     if (actionLoadingRef.current) return;
@@ -572,9 +595,12 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const catBalouTargets = duelTargets.filter(t => hasAnyCards(t.id));
   const jesseTargets = players.filter(p => p.is_alive && p.id !== playerId && (handCounts[p.id] ?? 0) > 0);
 
-  const needsDegainer = isMyTurn && !hasPending && game.turn_phase === 'draw' && myEquipmentTypes.some(t => t === 'dynamite' || t === 'prison');
-  const canDraw = isMyTurn && !hasPending && game.turn_phase === 'draw' && !needsDegainer;
-  const canAct = isMyTurn && !hasPending && game.turn_phase === 'play' && !discarding && !sidKetchumMode;
+  
+  const animationBlocking = !!abilityQueue.current;
+
+  const needsDegainer = isMyTurn && !hasPending && game.turn_phase === 'draw' && myEquipmentTypes.some(t => t === 'dynamite' || t === 'prison') && !animationBlocking ;
+  const canDraw = isMyTurn && !hasPending && game.turn_phase === 'draw' && !needsDegainer && !animationBlocking;
+  const canAct = isMyTurn && !hasPending && game.turn_phase === 'play' && !discarding && !sidKetchumMode && !animationBlocking;
   const canPlayBang = canAct && bangTargets.length > 0 && (hasVolcanic || isWillyTheKid || !me.has_played_bang_this_turn);
   const canPlayBeer = canAct && aliveCount > 2 && me.life_points < me.max_life_points;
   const canPlayDuel = canAct && duelTargets.length > 0;
@@ -646,66 +672,66 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
       <View style={styles.notice}>
         <ScrollView style={styles.confrontationScroll} nestedScrollEnabled>
           {!hasPending && <Text style={styles.noticeBody}>Aucune confrontation en cours.</Text>}
-          {mustRespondToBang && (
-            <>
-              <Text style={styles.noticeBody}>Vous êtes visé par un Bang! Répondez :</Text>
-              {myPendingRow!.cancels_needed > 1 && (
-                <Text style={styles.noticeMeta}>Annulations : {myPendingRow!.cancels_achieved}/{myPendingRow!.cancels_needed} (Slab le Flingueur)</Text>
-              )}
-              {hasMissed && <WoodButton title="Jouer Raté!" onPress={() => handleRespond('missed')} disabled={actionLoading} style={styles.noticeBtn} />}
-              {isCalamityJanet && hasBang && <WoodButton title="Jouer Bang! comme Raté!" onPress={() => handleRespond('missed', 'bang')} disabled={actionLoading} style={styles.noticeBtn} />}
-              {canTryBarrel && <WoodButton title="Essayer la Planque" onPress={handleTryBarrel} disabled={actionLoading} style={styles.noticeBtn} />}
-              {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => handleRespond('drink_beer')} disabled={actionLoading} variant="safe" style={styles.noticeBtn} />}
-              <WoodButton title="Encaisser les dégâts" onPress={() => handleRespond('accept_damage')} disabled={actionLoading} variant="primary" style={styles.noticeBtn} />
-            </>
-          )}
-          {mustRespondToGatling && (
-            <>
-              <Text style={styles.noticeBody}>Gatling ! Répondez :</Text>
-              {hasMissed && <WoodButton title="Jouer Raté!" onPress={() => handleRespondGatling('missed')} disabled={actionLoading} style={styles.noticeBtn} />}
-              {isCalamityJanet && hasBang && <WoodButton title="Jouer Bang! comme Raté!" onPress={() => handleRespondGatling('missed', 'bang')} disabled={actionLoading} style={styles.noticeBtn} />}
-              {canTryBarrel && <WoodButton title="Essayer la Planque" onPress={handleTryBarrelGatling} disabled={actionLoading} style={styles.noticeBtn} />}
-              {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => handleRespondGatling('drink_beer')} disabled={actionLoading} variant="safe" style={styles.noticeBtn} />}
-              <WoodButton title="Encaisser les dégâts" onPress={() => handleRespondGatling('accept_damage')} disabled={actionLoading} variant="primary" style={styles.noticeBtn} />
-            </>
-          )}
-          {mustRespondToDuel && (
-            <>
-              <Text style={styles.noticeBody}>Duel ! Continuez ou encaissez :</Text>
-              {hasBang && <WoodButton title="Jouer Bang!" onPress={() => handleRespondDuel('discard_bang')} disabled={actionLoading} style={styles.noticeBtn} />}
-              {isCalamityJanet && hasMissed && <WoodButton title="Jouer Raté! comme Bang!" onPress={() => handleRespondDuel('discard_bang', 'missed')} disabled={actionLoading} style={styles.noticeBtn} />}
-              {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => handleRespondDuel('drink_beer')} disabled={actionLoading} variant="safe" style={styles.noticeBtn} />}
-              <WoodButton title="Encaisser les dégâts" onPress={() => handleRespondDuel('accept_damage')} disabled={actionLoading} variant="primary" style={styles.noticeBtn} />
-            </>
-          )}
-          {mustRespondToIndians && (
-            <>
-              <Text style={styles.noticeBody}>Indiens! Défendez-vous ou encaissez :</Text>
-              {hasBang && <WoodButton title="Jouer Bang!" onPress={() => handleRespondIndians('discard_bang')} disabled={actionLoading} style={styles.noticeBtn} />}
-              {isCalamityJanet && hasMissed && <WoodButton title="Jouer Raté! comme Bang!" onPress={() => handleRespondIndians('discard_bang', 'missed')} disabled={actionLoading} style={styles.noticeBtn} />}
-              {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => handleRespondIndians('drink_beer')} disabled={actionLoading} variant="safe" style={styles.noticeBtn} />}
-              <WoodButton title="Encaisser les dégâts" onPress={() => handleRespondIndians('accept_damage')} disabled={actionLoading} variant="primary" style={styles.noticeBtn} />
-            </>
-          )}
-          {mustChooseCatBalouDiscard && (
-            <>
-              <Text style={styles.noticeBody}>Coup de foudre ! Choisissez une carte à défausser :</Text>
-              {hand.map(c => (
-                <WoodButton key={c.id} title={`${cardLabels[c.card_type] ?? c.card_type} (main)`} onPress={() => handleRespondCatBalouHand(c.id)} disabled={actionLoading} style={styles.noticeBtn} />
-              ))}
-              {myEquipmentTypes.map(t => (
-                <WoodButton key={t} title={`${cardLabels[t] ?? t} (en jeu)`} onPress={() => handleRespondCatBalouEquip(t)} disabled={actionLoading} style={styles.noticeBtn} />
-              ))}
-            </>
-          )}
-          {isMyStoreTurn && (
-            <>
-              <Text style={styles.noticeBody}>Magasin — choisissez une carte :</Text>
-              {storeCards.map(c => (
-                <WoodButton key={c.id} title={cardLabels[c.card_type] ?? c.card_type} onPress={() => handlePickStoreCard(c.id)} disabled={actionLoading} style={styles.noticeBtn} />
-              ))}
-            </>
-          )}
+            {mustRespondToBang && (
+              <>
+                <Text style={styles.noticeBody}>Vous êtes visé par un Bang! Répondez :</Text>
+                {myPendingRow!.cancels_needed > 1 && (
+                  <Text style={styles.noticeMeta}>Annulations : {myPendingRow!.cancels_achieved}/{myPendingRow!.cancels_needed} (Slab le Flingueur)</Text>
+                )}
+                {hasMissed && <WoodButton title="Jouer Raté!" onPress={() => handleRespond('missed')} disabled={actionLoading || animationBlocking} style={styles.noticeBtn} />}
+                {isCalamityJanet && hasBang && <WoodButton title="Jouer Bang! comme Raté!" onPress={() => handleRespond('missed', 'bang')} disabled={actionLoading || animationBlocking} style={styles.noticeBtn} />}
+                {canTryBarrel && <WoodButton title="Essayer la Planque" onPress={handleTryBarrel} disabled={actionLoading || animationBlocking} style={styles.noticeBtn} />}
+                {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => handleRespond('drink_beer')} disabled={actionLoading || animationBlocking} variant="safe" style={styles.noticeBtn} />}
+                <WoodButton title="Encaisser les dégâts" onPress={() => handleRespond('accept_damage')} disabled={actionLoading || animationBlocking} variant="primary" style={styles.noticeBtn} />
+              </>
+            )}
+            {mustRespondToGatling && (
+              <>
+                <Text style={styles.noticeBody}>Gatling ! Répondez :</Text>
+                {hasMissed && <WoodButton title="Jouer Raté!" onPress={() => handleRespondGatling('missed')} disabled={actionLoading || animationBlocking} style={styles.noticeBtn} />}
+                {isCalamityJanet && hasBang && <WoodButton title="Jouer Bang! comme Raté!" onPress={() => handleRespondGatling('missed', 'bang')} disabled={actionLoading || animationBlocking} style={styles.noticeBtn} />}
+                {canTryBarrel && <WoodButton title="Essayer la Planque" onPress={handleTryBarrelGatling} disabled={actionLoading || animationBlocking} style={styles.noticeBtn} />}
+                {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => handleRespondGatling('drink_beer')} disabled={actionLoading || animationBlocking} variant="safe" style={styles.noticeBtn} />}
+                <WoodButton title="Encaisser les dégâts" onPress={() => handleRespondGatling('accept_damage')} disabled={actionLoading || animationBlocking} variant="primary" style={styles.noticeBtn} />
+              </>
+            )}
+            {mustRespondToDuel && (
+              <>
+                <Text style={styles.noticeBody}>Duel ! Continuez ou encaissez :</Text>
+                {hasBang && <WoodButton title="Jouer Bang!" onPress={() => handleRespondDuel('discard_bang')} disabled={actionLoading || animationBlocking} style={styles.noticeBtn} />}
+                {isCalamityJanet && hasMissed && <WoodButton title="Jouer Raté! comme Bang!" onPress={() => handleRespondDuel('discard_bang', 'missed')} disabled={actionLoading || animationBlocking} style={styles.noticeBtn} />}
+                {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => handleRespondDuel('drink_beer')} disabled={actionLoading || animationBlocking} variant="safe" style={styles.noticeBtn} />}
+                <WoodButton title="Encaisser les dégâts" onPress={() => handleRespondDuel('accept_damage')} disabled={actionLoading || animationBlocking} variant="primary" style={styles.noticeBtn} />
+              </>
+            )}
+            {mustRespondToIndians && (
+              <>
+                <Text style={styles.noticeBody}>Indiens! Défendez-vous ou encaissez :</Text>
+                {hasBang && <WoodButton title="Jouer Bang!" onPress={() => handleRespondIndians('discard_bang')} disabled={actionLoading || animationBlocking} style={styles.noticeBtn} />}
+                {isCalamityJanet && hasMissed && <WoodButton title="Jouer Raté! comme Bang!" onPress={() => handleRespondIndians('discard_bang', 'missed')} disabled={actionLoading || animationBlocking} style={styles.noticeBtn} />}
+                {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => handleRespondIndians('drink_beer')} disabled={actionLoading || animationBlocking} variant="safe" style={styles.noticeBtn} />}
+                <WoodButton title="Encaisser les dégâts" onPress={() => handleRespondIndians('accept_damage')} disabled={actionLoading || animationBlocking} variant="primary" style={styles.noticeBtn} />
+              </>
+            )}
+            {mustChooseCatBalouDiscard && (
+              <>
+                <Text style={styles.noticeBody}>Coup de foudre ! Choisissez une carte à défausser :</Text>
+                {hand.map(c => (
+                  <WoodButton key={c.id} title={`${cardLabels[c.card_type] ?? c.card_type} (main)`} onPress={() => handleRespondCatBalouHand(c.id)} disabled={actionLoading || animationBlocking} style={styles.noticeBtn} />
+                ))}
+                {myEquipmentTypes.map(t => (
+                  <WoodButton key={t} title={`${cardLabels[t] ?? t} (en jeu)`} onPress={() => handleRespondCatBalouEquip(t)} disabled={actionLoading || animationBlocking} style={styles.noticeBtn} />
+                ))}
+              </>
+            )}
+            {isMyStoreTurn && (
+              <>
+                <Text style={styles.noticeBody}>Magasin — choisissez une carte :</Text>
+                {storeCards.map(c => (
+                  <WoodButton key={c.id} title={cardLabels[c.card_type] ?? c.card_type} onPress={() => handlePickStoreCard(c.id)} disabled={actionLoading || animationBlocking} style={styles.noticeBtn} />
+                ))}
+              </>
+            )}
           {waitingOnOthers && <Text style={styles.noticeBody}>{describePendingSituation()}</Text>}
         </ScrollView>
       </View>
@@ -778,8 +804,8 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
               />
             ))}
           </View>
-          <WoodButton title="Confirmer la défausse" onPress={handleConfirmEndTurn} disabled={actionLoading} variant="primary" style={styles.fullWidthBtn} />
-          <WoodButton title="Annuler" onPress={() => { setDiscarding(false); setSelectedDiscards([]); }} disabled={actionLoading} variant="muted" style={styles.fullWidthBtn} />
+          <WoodButton title="Confirmer la défausse" onPress={handleConfirmEndTurn} disabled={actionLoading || animationBlocking} variant="primary" style={styles.fullWidthBtn} />
+          <WoodButton title="Annuler" onPress={() => { setDiscarding(false); setSelectedDiscards([]); }} disabled={actionLoading || animationBlocking} variant="muted" style={styles.fullWidthBtn} />
         </>
       )}
 
@@ -798,30 +824,30 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
               />
             ))}
           </View>
-          <WoodButton title="Confirmer" onPress={handleConfirmSidHeal} disabled={actionLoading} variant="safe" style={styles.fullWidthBtn} />
-          <WoodButton title="Annuler" onPress={() => { setSidKetchumMode(false); setSelectedSidCards([]); }} disabled={actionLoading} variant="muted" style={styles.fullWidthBtn} />
+          <WoodButton title="Confirmer" onPress={handleConfirmSidHeal} disabled={actionLoading || animationBlocking} variant="safe" style={styles.fullWidthBtn} />
+          <WoodButton title="Annuler" onPress={() => { setSidKetchumMode(false); setSelectedSidCards([]); }} disabled={actionLoading || animationBlocking} variant="muted" style={styles.fullWidthBtn} />
         </>
       )}
 
-      {needsDegainer && <WoodButton title="Dégainer" onPress={handleDegainer} disabled={actionLoading} style={styles.fullWidthBtn} />}
+      {needsDegainer && <WoodButton title="Dégainer" onPress={handleDegainer} disabled={actionLoading || animationBlocking} style={styles.fullWidthBtn} />}
 
       {canDraw && myCharacter === 'jesse_jones' && (
         <>
-          <WoodButton title="Piocher normalement" onPress={handleDraw} disabled={actionLoading} style={styles.fullWidthBtn} />
+          <WoodButton title="Piocher normalement" onPress={handleDraw} disabled={actionLoading || animationBlocking} style={styles.fullWidthBtn} />
           <WoodButton title="Piocher dans la main d'un adversaire" onPress={() => setJesseTargetPicker(true)} disabled={actionLoading || jesseTargets.length === 0} style={styles.fullWidthBtn} />
         </>
       )}
       {canDraw && myCharacter === 'pedro_ramirez' && (
         <>
-          <WoodButton title="Piocher normalement" onPress={handleDraw} disabled={actionLoading} style={styles.fullWidthBtn} />
+          <WoodButton title="Piocher normalement" onPress={handleDraw} disabled={actionLoading || animationBlocking} style={styles.fullWidthBtn} />
           <WoodButton title="Piocher depuis la défausse" onPress={handleDrawPedroDiscard} disabled={actionLoading || discardTop.length === 0} style={styles.fullWidthBtn} />
         </>
       )}
       {canDraw && myCharacter === 'kit_carlson' && !kitCarlsonCards && (
-        <WoodButton title="Regarder le dessus de la pioche" onPress={handlePeekKitCarlson} disabled={actionLoading} style={styles.fullWidthBtn} />
+        <WoodButton title="Regarder le dessus de la pioche" onPress={handlePeekKitCarlson} disabled={actionLoading || animationBlocking} style={styles.fullWidthBtn} />
       )}
       {canDraw && !['jesse_jones', 'pedro_ramirez', 'kit_carlson'].includes(myCharacter) && (
-        <WoodButton title="Piocher" onPress={handleDraw} disabled={actionLoading} style={styles.fullWidthBtn} />
+        <WoodButton title="Piocher" onPress={handleDraw} disabled={actionLoading || animationBlocking} style={styles.fullWidthBtn} />
       )}
 
       {kitCarlsonCards && (
@@ -832,19 +858,19 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
               <PlayingCard key={i} cardType={c.type} suit={c.suit} value={c.value} selected={kitCarlsonKeep.includes(i)} onPress={() => toggleKitCarlsonKeep(i)} />
             ))}
           </View>
-          <WoodButton title="Confirmer" onPress={handleConfirmKitCarlson} disabled={actionLoading} variant="safe" style={styles.noticeBtn} />
+          <WoodButton title="Confirmer" onPress={handleConfirmKitCarlson} disabled={actionLoading || animationBlocking} variant="safe" style={styles.noticeBtn} />
         </NoticeBox>
       )}
 
       {myCharacter === 'sid_ketchum' && !amDead && me.life_points < me.max_life_points && hand.length >= 2 && !sidKetchumMode && !discarding && (
-        <WoodButton title="Défausser 2 cartes pour +1 PV (Sid Ketchum)" onPress={() => setSidKetchumMode(true)} disabled={actionLoading} variant="safe" style={styles.fullWidthBtn} />
+        <WoodButton title="Défausser 2 cartes pour +1 PV (Sid Ketchum)" onPress={() => setSidKetchumMode(true)} disabled={actionLoading || animationBlocking} variant="safe" style={styles.fullWidthBtn} />
       )}
 
       {canAct && (
         <WoodButton
           title={excess > 0 ? `Terminer le tour (défausser ${excess})` : 'Terminer le tour'}
           onPress={() => (excess > 0 ? setDiscarding(true) : handleConfirmEndTurn())}
-          disabled={actionLoading}
+          disabled={actionLoading || animationBlocking}
           variant="primary"
           style={styles.fullWidthBtn}
         />
@@ -954,9 +980,9 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
         <View style={styles.modalOverlay}>
           <View style={styles.modalBox}>
             <Text style={styles.modalTitle}>Voler quelle carte ?</Text>
-            <WoodButton title="Carte au hasard en main" onPress={() => handleSteal('hand')} disabled={actionLoading} style={styles.noticeBtn} />
+            <WoodButton title="Carte au hasard en main" onPress={() => handleSteal('hand')} disabled={actionLoading || animationBlocking} style={styles.noticeBtn} />
             {equipment.filter(e => e.player_id === stealFlow?.targetId).map(e => (
-              <WoodButton key={e.card_type} title={`${cardLabels[e.card_type] ?? e.card_type} (en jeu)`} onPress={() => handleSteal('in_play', e.card_type)} disabled={actionLoading} style={styles.noticeBtn} />
+              <WoodButton key={e.card_type} title={`${cardLabels[e.card_type] ?? e.card_type} (en jeu)`} onPress={() => handleSteal('in_play', e.card_type)} disabled={actionLoading || animationBlocking} style={styles.noticeBtn} />
             ))}
             <WoodButton title="Annuler" onPress={() => setStealFlow(null)} variant="muted" style={styles.noticeBtn} />
           </View>
@@ -976,6 +1002,7 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
         <WoodButton title="Abandonner la partie" onPress={handleAbandon} disabled={abandoning} variant="muted" style={{ marginTop: 24 }} />
       )}
       <WoodButton title="Quitter la partie (retour à l'accueil)" onPress={handleForceLeave} disabled={forceLeaving} variant="muted" style={{ marginTop: 10 }} />
+      <AbilityAnimationOverlay request={abilityQueue.current} onDone={abilityQueue.onDone} />
     </ScrollView>
   );
 }

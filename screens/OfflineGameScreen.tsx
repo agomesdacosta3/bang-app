@@ -7,6 +7,8 @@ import { WEAPON_TYPES, getWeaponRange } from '../lib/weapons';
 import { colors, fonts, cardLabels, equipmentTags, roleLabels, roleObjectives, winnerTeamLabels, characterLabels, characterDescriptions, renderPips, suitLabels } from '../theme';
 import WoodButton from '../components/WoodButton';
 import PlayingCard from '../components/PlayingCard';
+import AbilityAnimationOverlay, { AbilityAnimationType } from '../components/AbilityAnimationOverlay';
+import { useAbilityAnimationQueue } from '../hooks/useAbilityAnimationQueue';
 
 type Player = OfflineGameState['players'][number];
 
@@ -46,6 +48,7 @@ function NoticeBox({ title, children }: { title: string; children: React.ReactNo
 export default function OfflineGameScreen({ engine, onLeave }: { engine: OfflineEngine; onLeave: () => void }) {
   const engineRef = useRef<OfflineEngine>(engine);
   const botTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const animationActiveRef = useRef(false);
   const [state, setState] = useState<OfflineGameState>(engineRef.current.getState());
   const [targetPickerFor, setTargetPickerFor] = useState<string | null>(null);
   const [bangSourceType, setBangSourceType] = useState<'bang' | 'missed'>('bang');
@@ -61,6 +64,8 @@ export default function OfflineGameScreen({ engine, onLeave }: { engine: Offline
   const [selectedDiscards, setSelectedDiscards] = useState<string[]>([]);
   const [sidKetchumMode, setSidKetchumMode] = useState(false);
   const [selectedSidCards, setSelectedSidCards] = useState<string[]>([]);
+  const abilityQueue = useAbilityAnimationQueue();
+  const seenAbilityEventIds = useRef<Set<string> | null>(null);
 
   const humanId = engineRef.current.getHumanId();
   const me = state.players.find(p => p.id === humanId)!;
@@ -88,9 +93,13 @@ export default function OfflineGameScreen({ engine, onLeave }: { engine: Offline
   useEffect(() => {
     let cancelled = false;
 
-    function runOneStep() {
-      try {
-        const s = engineRef.current.getState();
+  function runOneStep() {
+    if (animationActiveRef.current) {
+      if (!cancelled) botTimeoutRef.current = setTimeout(runOneStep, 400);
+      return;
+    }
+    try {
+      const s = engineRef.current.getState();
         if (s.status === 'finished') { refresh(); return; }
 
         if (s.pending) {
@@ -134,6 +143,30 @@ export default function OfflineGameScreen({ engine, onLeave }: { engine: Offline
     botTimeoutRef.current = setTimeout(runOneStep, 2000 + Math.random() * 2000);
     return () => { cancelled = true; if (botTimeoutRef.current) clearTimeout(botTimeoutRef.current); };
   }, []);
+
+  useEffect(() => {
+    const events = state.events;
+    const abilityTypes: AbilityAnimationType[] = ['bart_cassidy_draw', 'el_gringo_steal', 'sid_ketchum_heal', 'vulture_sam_loot'];
+
+    // Premier passage : on mémorise ce qui existe déjà (reconnexion en cours de partie)
+    // sans rejouer d'animation pour des capacités déjà anciennes.
+    if (seenAbilityEventIds.current === null) {
+      seenAbilityEventIds.current = new Set(events.map(e => e.id));
+      return;
+    }
+
+    for (const e of events) {
+      if (seenAbilityEventIds.current.has(e.id)) continue;
+      seenAbilityEventIds.current.add(e.id);
+      if (abilityTypes.includes(e.eventType as AbilityAnimationType)) {
+        abilityQueue.enqueue(e.eventType as AbilityAnimationType, nameForSeat(e.actorSeat), e.targetSeat != null ? nameForSeat(e.targetSeat) : undefined);
+      }
+    }
+  }, [state.events]);
+
+  useEffect(() => {
+    animationActiveRef.current = !!abilityQueue.current;
+  }, [abilityQueue.current]);
 
   function Bold({ children }: { children: React.ReactNode }) {
     return <Text style={styles.eventBold}>{children}</Text>;
@@ -251,9 +284,10 @@ export default function OfflineGameScreen({ engine, onLeave }: { engine: Offline
   const myPendingTarget = state.pending?.targets.find(t => t.playerId === humanId);
   const canTryBarrel = maxBarrelTries > 0 && (myPendingTarget?.barrelTriesUsed ?? 0) < maxBarrelTries;
 
-  const needsDegainer = isMyTurn && !hasPending && state.turnPhase === 'draw' && myEquipTypes.some(t => t === 'dynamite' || t === 'prison');
-  const canDraw = isMyTurn && !hasPending && state.turnPhase === 'draw' && !needsDegainer;
-  const canAct = isMyTurn && !hasPending && state.turnPhase === 'play' && !discarding && !sidKetchumMode;
+  const animationBlocking = !!abilityQueue.current;
+  const needsDegainer = isMyTurn && !hasPending && state.turnPhase === 'draw' && myEquipTypes.some(t => t === 'dynamite' || t === 'prison') && !animationBlocking;
+  const canDraw = isMyTurn && !hasPending && state.turnPhase === 'draw' && !needsDegainer && !animationBlocking;
+  const canAct = isMyTurn && !hasPending && state.turnPhase === 'play' && !discarding && !sidKetchumMode && !animationBlocking;
 
   const bangTargets = state.players.filter(p => p.isAlive && p.id !== humanId && engineRef.current.distanceBetween(humanId, p.id) <= myWeaponRange);
   const duelTargets = state.players.filter(p => p.isAlive && p.id !== humanId);
@@ -375,52 +409,52 @@ export default function OfflineGameScreen({ engine, onLeave }: { engine: Offline
               {myPendingTarget!.cancelsNeeded > 1 && (
                 <Text style={styles.noticeMeta}>Annulations : {myPendingTarget!.cancelsAchieved}/{myPendingTarget!.cancelsNeeded} (Slab le Flingueur)</Text>
               )}
-              {hasMissed && <WoodButton title="Jouer Raté!" onPress={() => runAction(() => engineRef.current.respondBang(humanId, 'missed'))} style={styles.noticeBtn} />}
-              {isCalamityJanet && hasBang && <WoodButton title="Jouer Bang! comme Raté!" onPress={() => runAction(() => engineRef.current.respondBang(humanId, 'missed', 'bang'))} style={styles.noticeBtn} />}
-              {canTryBarrel && <WoodButton title="Essayer la Planque" onPress={handleTryBarrel} style={styles.noticeBtn} />}
-              {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => runAction(() => engineRef.current.respondBang(humanId, 'drink_beer'))} variant="safe" style={styles.noticeBtn} />}
-              <WoodButton title="Encaisser les dégâts" onPress={() => runAction(() => engineRef.current.respondBang(humanId, 'accept_damage'))} variant="primary" style={styles.noticeBtn} />
+              {hasMissed && <WoodButton title="Jouer Raté!" onPress={() => runAction(() => engineRef.current.respondBang(humanId, 'missed'))} disabled={animationBlocking} style={styles.noticeBtn} />}
+              {isCalamityJanet && hasBang && <WoodButton title="Jouer Bang! comme Raté!" onPress={() => runAction(() => engineRef.current.respondBang(humanId, 'missed', 'bang'))} disabled={animationBlocking} style={styles.noticeBtn} />}
+              {canTryBarrel && <WoodButton title="Essayer la Planque" onPress={handleTryBarrel} disabled={animationBlocking} style={styles.noticeBtn} />}
+              {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => runAction(() => engineRef.current.respondBang(humanId, 'drink_beer'))} variant="safe" disabled={animationBlocking} style={styles.noticeBtn} />}
+              <WoodButton title="Encaisser les dégâts" onPress={() => runAction(() => engineRef.current.respondBang(humanId, 'accept_damage'))} variant="primary" disabled={animationBlocking} style={styles.noticeBtn} />
             </>
           )}
           {mustRespondToGatling && (
             <>
               <Text style={styles.noticeBody}>Gatling ! Répondez :</Text>
-              {hasMissed && <WoodButton title="Jouer Raté!" onPress={() => runAction(() => engineRef.current.respondGatling(humanId, 'missed'))} style={styles.noticeBtn} />}
-              {isCalamityJanet && hasBang && <WoodButton title="Jouer Bang! comme Raté!" onPress={() => runAction(() => engineRef.current.respondGatling(humanId, 'missed', 'bang'))} style={styles.noticeBtn} />}
-              {canTryBarrel && <WoodButton title="Essayer la Planque" onPress={handleTryBarrel} style={styles.noticeBtn} />}
-              {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => runAction(() => engineRef.current.respondGatling(humanId, 'drink_beer'))} variant="safe" style={styles.noticeBtn} />}
-              <WoodButton title="Encaisser les dégâts" onPress={() => runAction(() => engineRef.current.respondGatling(humanId, 'accept_damage'))} variant="primary" style={styles.noticeBtn} />
+              {hasMissed && <WoodButton title="Jouer Raté!" onPress={() => runAction(() => engineRef.current.respondGatling(humanId, 'missed'))} disabled={animationBlocking} style={styles.noticeBtn} />}
+              {isCalamityJanet && hasBang && <WoodButton title="Jouer Bang! comme Raté!" onPress={() => runAction(() => engineRef.current.respondGatling(humanId, 'missed', 'bang'))} disabled={animationBlocking} style={styles.noticeBtn} />}
+              {canTryBarrel && <WoodButton title="Essayer la Planque" onPress={handleTryBarrel} disabled={animationBlocking} style={styles.noticeBtn} />}
+              {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => runAction(() => engineRef.current.respondGatling(humanId, 'drink_beer'))} variant="safe" disabled={animationBlocking} style={styles.noticeBtn} />}
+              <WoodButton title="Encaisser les dégâts" onPress={() => runAction(() => engineRef.current.respondGatling(humanId, 'accept_damage'))} variant="primary" disabled={animationBlocking} style={styles.noticeBtn} />
             </>
           )}
           {mustRespondToDuel && (
             <>
               <Text style={styles.noticeBody}>Duel ! Continuez ou encaissez :</Text>
-              {hasBang && <WoodButton title="Jouer Bang!" onPress={() => runAction(() => engineRef.current.respondDuel(humanId, 'discard_bang'))} style={styles.noticeBtn} />}
-              {isCalamityJanet && hasMissed && <WoodButton title="Jouer Raté! comme Bang!" onPress={() => runAction(() => engineRef.current.respondDuel(humanId, 'discard_bang', 'missed'))} style={styles.noticeBtn} />}
-              {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => runAction(() => engineRef.current.respondDuel(humanId, 'drink_beer'))} variant="safe" style={styles.noticeBtn} />}
-              <WoodButton title="Encaisser les dégâts" onPress={() => runAction(() => engineRef.current.respondDuel(humanId, 'accept_damage'))} variant="primary" style={styles.noticeBtn} />
+              {hasBang && <WoodButton title="Jouer Bang!" onPress={() => runAction(() => engineRef.current.respondDuel(humanId, 'discard_bang'))} disabled={animationBlocking} style={styles.noticeBtn} />}
+              {isCalamityJanet && hasMissed && <WoodButton title="Jouer Raté! comme Bang!" onPress={() => runAction(() => engineRef.current.respondDuel(humanId, 'discard_bang', 'missed'))} disabled={animationBlocking} style={styles.noticeBtn} />}
+              {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => runAction(() => engineRef.current.respondDuel(humanId, 'drink_beer'))} variant="safe" disabled={animationBlocking} style={styles.noticeBtn} />}
+              <WoodButton title="Encaisser les dégâts" onPress={() => runAction(() => engineRef.current.respondDuel(humanId, 'accept_damage'))} variant="primary" disabled={animationBlocking} style={styles.noticeBtn} />
             </>
           )}
           {mustRespondToIndians && (
             <>
               <Text style={styles.noticeBody}>Indiens! Défendez-vous ou encaissez :</Text>
-              {hasBang && <WoodButton title="Jouer Bang!" onPress={() => runAction(() => engineRef.current.respondIndians(humanId, 'discard_bang'))} style={styles.noticeBtn} />}
-              {isCalamityJanet && hasMissed && <WoodButton title="Jouer Raté! comme Bang!" onPress={() => runAction(() => engineRef.current.respondIndians(humanId, 'discard_bang', 'missed'))} style={styles.noticeBtn} />}
-              {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => runAction(() => engineRef.current.respondIndians(humanId, 'drink_beer'))} variant="safe" style={styles.noticeBtn} />}
-              <WoodButton title="Encaisser les dégâts" onPress={() => runAction(() => engineRef.current.respondIndians(humanId, 'accept_damage'))} variant="primary" style={styles.noticeBtn} />
+              {hasBang && <WoodButton title="Jouer Bang!" onPress={() => runAction(() => engineRef.current.respondIndians(humanId, 'discard_bang'))} disabled={animationBlocking} style={styles.noticeBtn} />}
+              {isCalamityJanet && hasMissed && <WoodButton title="Jouer Raté! comme Bang!" onPress={() => runAction(() => engineRef.current.respondIndians(humanId, 'discard_bang', 'missed'))} disabled={animationBlocking} style={styles.noticeBtn} />}
+              {canDrinkBeerToSurvive && <WoodButton title="Boire une Bière (survivre)" onPress={() => runAction(() => engineRef.current.respondIndians(humanId, 'drink_beer'))} variant="safe" disabled={animationBlocking} style={styles.noticeBtn} />}
+              <WoodButton title="Encaisser les dégâts" onPress={() => runAction(() => engineRef.current.respondIndians(humanId, 'accept_damage'))} variant="primary" disabled={animationBlocking} style={styles.noticeBtn} />
             </>
           )}
           {mustChooseCatBalouDiscard && (
             <>
               <Text style={styles.noticeBody}>Coup de foudre ! Choisissez une carte à défausser :</Text>
-              {myHand.map(c => <WoodButton key={c.id} title={`${cardLabels[c.type] ?? c.type} (main)`} onPress={() => runAction(() => engineRef.current.respondCatBalou(humanId, c.id))} style={styles.noticeBtn} />)}
-              {myEquipTypes.map(t => <WoodButton key={t} title={`${cardLabels[t] ?? t} (en jeu)`} onPress={() => runAction(() => engineRef.current.respondCatBalou(humanId, undefined, t))} style={styles.noticeBtn} />)}
+              {myHand.map(c => <WoodButton key={c.id} title={`${cardLabels[c.type] ?? c.type} (main)`} onPress={() => runAction(() => engineRef.current.respondCatBalou(humanId, c.id))} disabled={animationBlocking} style={styles.noticeBtn} />)}
+              {myEquipTypes.map(t => <WoodButton key={t} title={`${cardLabels[t] ?? t} (en jeu)`} onPress={() => runAction(() => engineRef.current.respondCatBalou(humanId, undefined, t))} disabled={animationBlocking} style={styles.noticeBtn} />)}
             </>
           )}
           {isMyStoreTurn && (
             <>
               <Text style={styles.noticeBody}>Magasin — choisissez une carte :</Text>
-              {state.generalStoreCards.map(c => <WoodButton key={c.id} title={cardLabels[c.type] ?? c.type} onPress={() => runAction(() => engineRef.current.pickGeneralStoreCard(humanId, c.id))} style={styles.noticeBtn} />)}
+              {state.generalStoreCards.map(c => <WoodButton key={c.id} title={cardLabels[c.type] ?? c.type} onPress={() => runAction(() => engineRef.current.pickGeneralStoreCard(humanId, c.id))} disabled={animationBlocking} style={styles.noticeBtn} />)}
             </>
           )}
           {waitingOnOthers && <Text style={styles.noticeBody}>{describePending()}</Text>}
@@ -522,7 +556,7 @@ export default function OfflineGameScreen({ engine, onLeave }: { engine: Offline
         </NoticeBox>
       )}
 
-      {me.character === 'sid_ketchum' && !amDead && me.lifePoints < me.maxLifePoints && myHand.length >= 2 && !sidKetchumMode && !discarding && (
+      {me.character === 'sid_ketchum' && !amDead && me.lifePoints < me.maxLifePoints && myHand.length >= 2 && !sidKetchumMode && !discarding && !animationBlocking && (
         <WoodButton title="Défausser 2 cartes pour +1 PV (Sid Ketchum)" onPress={() => setSidKetchumMode(true)} variant="safe" style={styles.fullWidthBtn} />
       )}
 
@@ -655,6 +689,7 @@ export default function OfflineGameScreen({ engine, onLeave }: { engine: Offline
       </Modal>
 
       <WoodButton title="Quitter la partie" onPress={onLeave} variant="muted" style={{ marginTop: 24 }} />
+      <AbilityAnimationOverlay request={abilityQueue.current} onDone={abilityQueue.onDone} />
     </ScrollView>
   );
 }

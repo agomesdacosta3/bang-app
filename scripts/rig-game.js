@@ -23,12 +23,13 @@ const TOTAL_PLAYERS = 4; // ajustable entre 4 et 7 — le script complète avec 
 
 // Édite ici : seat_position -> { role?, character?, hand?, inPlay?, life?, forcedAction? }
 const RIG = {
-  0: { character: 'bart_cassidy', hand: ['bang', 'bang'] },
-  1: { character: 'suzy_lafayette', role: 'outlaw' },
-  2: { character: 'jesse_jones' },
+    0: { character: 'sid_ketchum' },
+    1: { character: 'el_gringo'},
+    2: { character: 'bart_cassidy' },
+    3: { character: 'vulture_sam'}
 };
 
-const BOT_NICKNAMES = ['Bandit1', 'Bandit2', 'Bandit3'];
+const BOT_NICKNAMES = ['Bot 1', 'Bot 2', 'Bot 3'];
 const CHARACTER_BASE_LIFE = { paul_regret: 3, el_gringo: 3 };
 const SUITS = ['hearts', 'diamonds', 'clubs', 'spades'];
 function randomSuitValue() {
