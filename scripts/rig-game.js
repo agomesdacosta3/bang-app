@@ -1,8 +1,9 @@
-// Crée une partie de test complète à partir d'un code, applique un scénario (rôle/personnage/main)
-// sur les sièges choisis, puis fait tourner la partie jusqu'à la fin.
-// Usage : 1) crée une partie depuis le téléphone, note le code
+// Crée une partie de test complète à partir de la dernière partie en attente de joueurs (statut
+// "lobby"), applique un scénario (rôle/personnage/main) sur les sièges choisis, puis fait tourner
+// la partie jusqu'à la fin.
+// Usage : 1) crée une partie depuis le téléphone (reste sur l'écran du lobby)
 //         2) édite RIG et TOTAL_PLAYERS ci-dessous
-//         3) node scripts/rig-game.js CODE
+//         3) node scripts/rig-game.js
 //
 // Depuis l'introduction du système "prêt", les bots doivent désormais choisir un pseudo et se
 // déclarer prêts comme le ferait un vrai joueur — la partie démarre automatiquement dès que TOI
@@ -13,19 +14,13 @@
 const { createClient } = require('@supabase/supabase-js');
 const { LOCAL_URL, ANON_KEY, SERVICE_ROLE_KEY, call, runGameLoop, printGameSummary } = require('./bot-lib');
 
-const JOIN_CODE = process.argv[2];
-if (!JOIN_CODE) {
-  console.error('Usage: node scripts/rig-game.js CODE');
-  process.exit(1);
-}
-
 const TOTAL_PLAYERS = 4; // ajustable entre 4 et 7 — le script complète avec des bots jusqu'à ce total
 
 // Édite ici : seat_position -> { role?, character?, hand?, inPlay?, life?, forcedAction? }
 const RIG = {
-    0: { character: 'sid_ketchum' },
+    0: { character: 'kit_carlson' },
     1: { character: 'el_gringo'},
-    2: { character: 'bart_cassidy' },
+    // 2: { character: 'bart_cassidy' },
     3: { character: 'vulture_sam'}
 };
 
@@ -38,6 +33,21 @@ function randomSuitValue() {
 
 const admin = createClient(LOCAL_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 
+async function findLatestLobbyGame() {
+  const { data, error } = await admin
+    .from('games')
+    .select('id, join_code, created_at')
+    .eq('status', 'lobby')
+    .order('created_at', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  if (!data || data.length === 0) {
+    console.error('Aucune partie en attente de joueurs (statut "lobby") trouvée.\nCrée une partie depuis le téléphone et reste sur l\u2019écran du lobby avant de relancer ce script.');
+    process.exit(1);
+  }
+  return data[0].join_code;
+}
+
 function waitForGameStart(gameId) {
   return new Promise(resolve => {
     const check = setInterval(async () => {
@@ -48,10 +58,13 @@ function waitForGameStart(gameId) {
 }
 
 async function run() {
+  const JOIN_CODE = await findLatestLobbyGame();
+  console.log(`Partie détectée automatiquement — code ${JOIN_CODE}`);
+
   const bots = [];
   let gameId;
 
-  // Premier bot : résout le code et permet de connaître l'état réel actuel du lobby
+  // Premier bot : rejoint via le code détecté, permet de connaître l'état réel actuel du lobby
   const firstClient = createClient(LOCAL_URL, ANON_KEY, { auth: { persistSession: false } });
   const { data: firstAuth, error: firstAuthError } = await firstClient.auth.signInAnonymously();
   if (firstAuthError) throw firstAuthError;

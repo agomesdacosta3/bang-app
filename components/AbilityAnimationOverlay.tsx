@@ -2,7 +2,10 @@ import React, { useEffect, useRef } from 'react';
 import { View, Text, Animated, Easing, StyleSheet } from 'react-native';
 import { colors, fonts } from '../theme';
 
-export type AbilityAnimationType = 'bart_cassidy_draw' | 'el_gringo_steal' | 'sid_ketchum_heal' | 'vulture_sam_loot';
+export type AbilityAnimationType =
+  | 'bart_cassidy_draw' | 'el_gringo_steal' | 'sid_ketchum_heal' | 'vulture_sam_loot'
+  | 'suzy_lafayette_draw' | 'black_jack_bonus_draw' | 'lucky_duke_draw'
+  | 'jesse_jones_steal' | 'pedro_ramirez_discard_draw' | 'kit_carlson_pick';
 
 export interface AbilityAnimationRequest {
   id: string;
@@ -19,6 +22,12 @@ const AUTHORED_DURATIONS_MS: Record<AbilityAnimationType, number> = {
   el_gringo_steal: 3200,
   sid_ketchum_heal: 3000,
   vulture_sam_loot: 3400,
+  suzy_lafayette_draw: 2600,
+  black_jack_bonus_draw: 3000,
+  lucky_duke_draw: 2800,
+  jesse_jones_steal: 2600,
+  pedro_ramirez_discard_draw: 2600,
+  kit_carlson_pick: 3200,
 };
 
 const SLOWDOWN_FACTOR = 2; // 2 = deux fois plus lent que la conception d'origine
@@ -237,11 +246,179 @@ function SceneVultureSam({ progress, actorName, targetName }: { progress: Animat
   );
 }
 
+function SceneSuzyLafayette({ progress, actorName }: { progress: Animated.Value; actorName: string }) {
+  const D = AUTHORED_DURATIONS_MS.suzy_lafayette_draw / 1000;
+  const f = (s: number) => s / D;
+  const pulse = pulseScale(progress, f(1.1), f(0.2));
+  const move = windowed(progress, f(0.4), f(1.1));
+  const x = move.interpolate({ inputRange: [0, 1], outputRange: [225, 78] });
+  const y = move.interpolate({ inputRange: [0, 0.5, 1], outputRange: [55, 25, 40] });
+  const scale = popScale(move);
+  const cardOpacity = fadeInHoldOut(progress, f(0.35), f(0.4), f(1.1), f(1.3));
+  const emptyBadgeOpacity = fadeInHoldOut(progress, 0, f(0.1), f(0.35), f(0.55));
+  const badgeOpacity = fadeInHoldOut(progress, f(1.1), f(1.2), f(1.9), f(2.1));
+  const capO1 = progress.interpolate({ inputRange: [0, f(0.4), f(0.45), 1], outputRange: [1, 1, 0, 0], extrapolate: 'clamp' });
+  const capO2 = progress.interpolate({ inputRange: [0, f(0.4), f(0.45), 1], outputRange: [0, 0, 1, 1], extrapolate: 'clamp' });
+  return (
+    <View style={styles.stage}>
+      <Avatar x={78} y={55} letter={actorName[0]} tone="self" scale={pulse} />
+      <CardBack x={225} y={50} />
+      <Text style={{ position: 'absolute', left: 205, top: 78, fontFamily: fonts.body, fontSize: 10, color: colors.leatherDark }}>Pioche</Text>
+      <Badge x={78} y={108} text="Main vide" opacity={emptyBadgeOpacity} translateY={0} color={colors.leatherDark} />
+      <CardFace x={x as any} y={y as any} scale={scale} opacity={cardOpacity} corner="7♦" name="Bang!" red w={46} h={64} />
+      <Badge x={78} y={135} text="+1 carte" opacity={badgeOpacity} translateY={0} color={colors.sage} />
+      <CaptionSwap phase1={`${actorName} n'a plus de carte en main…`} phase2="…elle pioche aussitôt une carte !" o1={capO1} o2={capO2} />
+    </View>
+  );
+}
+
+function SceneBlackJack({ progress, actorName }: { progress: Animated.Value; actorName: string }) {
+  const D = AUTHORED_DURATIONS_MS.black_jack_bonus_draw / 1000;
+  const f = (s: number) => s / D;
+  const pulse = pulseScale(progress, f(1.3), f(0.2));
+  const revealOpacity = fadeInHoldOut(progress, 0, f(0.15), 1, 1);
+  const move = windowed(progress, f(0.6), f(1.3));
+  const x = move.interpolate({ inputRange: [0, 1], outputRange: [225, 78] });
+  const y = move.interpolate({ inputRange: [0, 0.5, 1], outputRange: [55, 25, 40] });
+  const scale = popScale(move);
+  const bonusOpacity = fadeInHoldOut(progress, f(0.55), f(0.6), f(1.7), f(1.9));
+  const badgeOpacity = fadeInHoldOut(progress, f(1.3), f(1.4), f(2.1), f(2.3));
+  const capO1 = progress.interpolate({ inputRange: [0, f(0.6), f(0.65), 1], outputRange: [1, 1, 0, 0], extrapolate: 'clamp' });
+  const capO2 = progress.interpolate({ inputRange: [0, f(0.6), f(0.65), 1], outputRange: [0, 0, 1, 1], extrapolate: 'clamp' });
+  return (
+    <View style={styles.stage}>
+      <Avatar x={78} y={55} letter={actorName[0]} tone="self" scale={pulse} />
+      <CardFace x={78} y={94} scale={1} opacity={revealOpacity} corner="Q♥" name="Bang!" red w={36} h={46} />
+      <CardBack x={225} y={50} />
+      <Text style={{ position: 'absolute', left: 205, top: 78, fontFamily: fonts.body, fontSize: 10, color: colors.leatherDark }}>Pioche</Text>
+      <CardFace x={x as any} y={y as any} scale={scale} opacity={bonusOpacity} corner="4♥" name="Raté!" red w={46} h={64} />
+      <Badge x={78} y={135} text="+1 carte bonus" opacity={badgeOpacity} translateY={0} color={colors.sage} />
+      <CaptionSwap phase1={`${actorName} révèle un Cœur…`} phase2="…et pioche une carte supplémentaire !" o1={capO1} o2={capO2} />
+    </View>
+  );
+}
+
+function SceneLuckyDuke({ progress, actorName }: { progress: Animated.Value; actorName: string }) {
+  const D = AUTHORED_DURATIONS_MS.lucky_duke_draw / 1000;
+  const f = (s: number) => s / D;
+  const pulse = pulseScale(progress, f(1.0), f(0.2));
+  const popIn = windowed(progress, f(0.2), f(0.6));
+  const scaleIn = popScale(popIn);
+  const opacityIn = fadeInHoldOut(progress, f(0.15), f(0.2), 1, 1);
+  const finalFade = fadeInHoldOut(progress, 0, 0.001, f(2.0), f(2.2));
+  const pickT = windowed(progress, f(1.0), f(1.3));
+  const goodScale = pickT.interpolate({ inputRange: [0, 1], outputRange: [1, 1.18] });
+  const badScale = pickT.interpolate({ inputRange: [0, 1], outputRange: [1, 0.6] });
+  const badOpacity = pickT.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
+  const badgeOpacity = fadeInHoldOut(progress, f(1.0), f(1.1), f(1.8), f(2.0));
+  const capO1 = progress.interpolate({ inputRange: [0, f(0.9), f(0.95), 1], outputRange: [1, 1, 0, 0], extrapolate: 'clamp' });
+  const capO2 = progress.interpolate({ inputRange: [0, f(0.9), f(0.95), 1], outputRange: [0, 0, 1, 1], extrapolate: 'clamp' });
+  return (
+    <View style={styles.stage}>
+      <Avatar x={152} y={55} letter={actorName[0]} tone="self" scale={pulse} />
+      <CardFace x={130} y={92} scale={Animated.multiply(scaleIn, goodScale) as any} opacity={Animated.multiply(opacityIn, finalFade) as any} corner="9♥" name="Bang!" red w={46} h={64} />
+      <CardFace x={174} y={92} scale={Animated.multiply(scaleIn, badScale) as any} opacity={Animated.multiply(opacityIn, Animated.multiply(badOpacity, finalFade)) as any} corner="5♠" name="Bang!" w={46} h={64} />
+      <Badge x={152} y={135} text="Carte retenue" opacity={badgeOpacity} translateY={0} color={colors.sage} />
+      <CaptionSwap phase1={`${actorName} dégaine avec 2 cartes…`} phase2="…et garde la plus favorable !" o1={capO1} o2={capO2} />
+    </View>
+  );
+}
+
+function SceneJesseJones({ progress, actorName, targetName }: { progress: Animated.Value; actorName: string; targetName: string }) {
+  const D = AUTHORED_DURATIONS_MS.jesse_jones_steal / 1000;
+  const f = (s: number) => s / D;
+  const pulse = pulseScale(progress, f(0.55), f(0.2));
+  const steal = windowed(progress, f(0.2), f(0.7));
+  const sx = steal.interpolate({ inputRange: [0, 1], outputRange: [78, 225] });
+  const sy = steal.interpolate({ inputRange: [0, 0.5, 1], outputRange: [55, 25, 40] });
+  const sScale = popScale(steal);
+  const sOpacity = fadeInHoldOut(progress, f(0.15), f(0.2), f(1.4), f(1.6));
+  const badgeOpacity = fadeInHoldOut(progress, f(0.7), f(0.8), f(1.9), f(2.1));
+  const capO1 = progress.interpolate({ inputRange: [0, f(0.65), f(0.7), 1], outputRange: [1, 1, 0, 0], extrapolate: 'clamp' });
+  const capO2 = progress.interpolate({ inputRange: [0, f(0.65), f(0.7), 1], outputRange: [0, 0, 1, 1], extrapolate: 'clamp' });
+  return (
+    <View style={styles.stage}>
+      <Avatar x={78} y={55} letter={targetName[0]} tone="other" />
+      <Avatar x={225} y={55} letter={actorName[0]} tone="self" scale={pulse} />
+      <CardFace x={sx as any} y={sy as any} scale={sScale} opacity={sOpacity} corner="10♠" name="Bang!" w={46} h={64} />
+      <Badge x={225} y={135} text="+2 cartes" opacity={badgeOpacity} translateY={0} color={colors.sage} />
+      <CaptionSwap phase1={`${actorName} pioche dans la main de ${targetName}…`} phase2="…puis complète sa main depuis la pioche !" o1={capO1} o2={capO2} />
+    </View>
+  );
+}
+
+function ScenePedroRamirez({ progress, actorName }: { progress: Animated.Value; actorName: string }) {
+  const D = AUTHORED_DURATIONS_MS.pedro_ramirez_discard_draw / 1000;
+  const f = (s: number) => s / D;
+  const pulse = pulseScale(progress, f(0.55), f(0.2));
+  const move = windowed(progress, f(0.2), f(0.7));
+  const x = move.interpolate({ inputRange: [0, 1], outputRange: [225, 78] });
+  const y = move.interpolate({ inputRange: [0, 0.5, 1], outputRange: [55, 25, 40] });
+  const scale = popScale(move);
+  const opacity = fadeInHoldOut(progress, f(0.15), f(0.2), f(1.4), f(1.6));
+  const badgeOpacity = fadeInHoldOut(progress, f(0.7), f(0.8), f(1.9), f(2.1));
+  const capO1 = progress.interpolate({ inputRange: [0, f(0.65), f(0.7), 1], outputRange: [1, 1, 0, 0], extrapolate: 'clamp' });
+  const capO2 = progress.interpolate({ inputRange: [0, f(0.65), f(0.7), 1], outputRange: [0, 0, 1, 1], extrapolate: 'clamp' });
+  return (
+    <View style={styles.stage}>
+      <Avatar x={78} y={55} letter={actorName[0]} tone="self" scale={pulse} />
+      <Text style={{ position: 'absolute', left: 205, top: 82, fontFamily: fonts.body, fontSize: 10, color: colors.leatherDark }}>Défausse</Text>
+      <CardFace x={x as any} y={y as any} scale={scale} opacity={opacity} corner="J♣" name="Panique !" w={46} h={64} />
+      <Badge x={78} y={135} text="+2 cartes" opacity={badgeOpacity} translateY={0} color={colors.sage} />
+      <CaptionSwap phase1={`${actorName} récupère la dernière carte défaussée…`} phase2="…puis pioche une carte supplémentaire !" o1={capO1} o2={capO2} />
+    </View>
+  );
+}
+
+function SceneKitCarlson({ progress, actorName }: { progress: Animated.Value; actorName: string }) {
+  const D = AUTHORED_DURATIONS_MS.kit_carlson_pick / 1000;
+  const f = (s: number) => s / D;
+  const pulse = pulseScale(progress, f(1.6), f(0.2));
+  const fanIn = windowed(progress, f(0.15), f(0.45));
+  const fanScale = popScale(fanIn);
+  const fanOpacity = fadeInHoldOut(progress, f(0.1), f(0.15), 1, 1);
+  const keep = (delay: number, fanX: number) => {
+    const mv = windowed(progress, f(delay), f(delay + 0.55));
+    const x = mv.interpolate({ inputRange: [0, 1], outputRange: [fanX, 78] });
+    const y = mv.interpolate({ inputRange: [0, 0.5, 1], outputRange: [48, 20, 40] });
+    const scale = popScale(mv);
+    const opacity = fadeInHoldOut(progress, 0, 0.001, f(delay + 0.55), f(delay + 0.75));
+    return { x, y, scale, opacity };
+  };
+  const k1 = keep(0.7, 212);
+  const k2 = keep(0.9, 238);
+  const dropT = windowed(progress, f(0.7), f(1.0));
+  const dropScale = Animated.multiply(fanScale, dropT.interpolate({ inputRange: [0, 1], outputRange: [1, 0.3] }));
+  const dropOpacity = Animated.multiply(fanOpacity, dropT.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }));
+  const badgeOpacity = fadeInHoldOut(progress, f(1.45), f(1.55), f(2.3), f(2.5));
+  const capO1 = progress.interpolate({ inputRange: [0, f(0.65), f(0.7), 1], outputRange: [1, 1, 0, 0], extrapolate: 'clamp' });
+  const capO2 = progress.interpolate({ inputRange: [0, f(0.65), f(0.7), 1], outputRange: [0, 0, 1, 1], extrapolate: 'clamp' });
+  return (
+    <View style={styles.stage}>
+      <Avatar x={78} y={55} letter={actorName[0]} tone="self" scale={pulse} />
+      <Text style={{ position: 'absolute', left: 205, top: 78, fontFamily: fonts.body, fontSize: 10, color: colors.leatherDark }}>Pioche</Text>
+      <CardBack x={212} y={48} opacity={fanOpacity as any} scale={fanScale as any} />
+      <CardBack x={225} y={52} opacity={dropOpacity as any} scale={dropScale as any} />
+      <CardBack x={238} y={48} opacity={fanOpacity as any} scale={fanScale as any} />
+      <CardFace x={k1.x as any} y={k1.y as any} scale={k1.scale} opacity={k1.opacity} corner="K♦" name="Bang!" red w={44} h={60} />
+      <CardFace x={k2.x as any} y={k2.y as any} scale={k2.scale} opacity={k2.opacity} corner="7♠" name="Raté!" w={44} h={60} />
+      <Badge x={78} y={135} text="+2 cartes" opacity={badgeOpacity} translateY={0} color={colors.sage} />
+      <CaptionSwap phase1={`${actorName} regarde les 3 cartes du dessus…`} phase2="…et garde les 2 meilleures !" o1={capO1} o2={capO2} />
+    </View>
+  );
+}
+
 const SCENES: Record<AbilityAnimationType, React.ComponentType<any>> = {
   bart_cassidy_draw: SceneBartCassidy,
   el_gringo_steal: SceneElGringo,
   sid_ketchum_heal: SceneSidKetchum,
   vulture_sam_loot: SceneVultureSam,
+  suzy_lafayette_draw: SceneSuzyLafayette,
+  black_jack_bonus_draw: SceneBlackJack,
+  lucky_duke_draw: SceneLuckyDuke,
+  jesse_jones_steal: SceneJesseJones,
+  pedro_ramirez_discard_draw: ScenePedroRamirez,
+  kit_carlson_pick: SceneKitCarlson,
 };
 
 const TITLES: Record<AbilityAnimationType, string> = {
@@ -249,6 +426,12 @@ const TITLES: Record<AbilityAnimationType, string> = {
   el_gringo_steal: 'El Gringo',
   sid_ketchum_heal: 'Sid Ketchum',
   vulture_sam_loot: 'Sam le Vautour',
+  suzy_lafayette_draw: 'Suzy Lafayette',
+  black_jack_bonus_draw: 'Black Jack',
+  lucky_duke_draw: 'Lucky Duke',
+  jesse_jones_steal: 'Jesse Jones',
+  pedro_ramirez_discard_draw: 'Pedro Ramirez',
+  kit_carlson_pick: 'Kit Carlson',
 };
 
 // ---------- le composant public : superposition auto-gérée ----------

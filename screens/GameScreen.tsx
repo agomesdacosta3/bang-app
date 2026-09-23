@@ -26,6 +26,7 @@ type DiscardCard = { id: string; card_type: string; suit: string; value: number 
 type GameEvent = {
   id: string; event_type: string; actor_seat: number | null; target_seat: number | null;
   amount: number | null; card_type: string | null; thread_id: string | null; created_at: string;
+  drawn_suit: string | null; drawn_value: number | null; drawn_suit_2: string | null; drawn_value_2: number | null;
 };
 
 function isRootEvent(e: GameEvent) { return e.thread_id === e.id; }
@@ -329,7 +330,11 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   }, [isMyTurn, game?.turn_phase]);
 
 useEffect(() => {
-  const abilityTypes: AbilityAnimationType[] = ['bart_cassidy_draw', 'el_gringo_steal', 'sid_ketchum_heal', 'vulture_sam_loot'];
+  const abilityTypes: AbilityAnimationType[] = [
+  'bart_cassidy_draw', 'el_gringo_steal', 'sid_ketchum_heal', 'vulture_sam_loot',
+  'suzy_lafayette_draw', 'black_jack_bonus_draw', 'jesse_jones_steal',
+  'pedro_ramirez_discard_draw', 'kit_carlson_pick',
+];
 
   // Premier passage : on mémorise ce qui existe déjà (reconnexion en cours de partie)
   // sans rejouer d'animation pour des capacités déjà anciennes.
@@ -341,9 +346,16 @@ useEffect(() => {
   for (const e of events) {
     if (seenAbilityEventIds.current.has(e.id)) continue;
     seenAbilityEventIds.current.add(e.id);
+    // Lucky Duke : même événement que n'importe quel dégainer, distingué uniquement
+    // par la présence d'une 2e carte tirée (drawn_suit_2) — jamais renseignée ailleurs.
+    if (e.event_type === 'degainer_draw' && e.drawn_suit_2 != null) {
+      abilityQueue.enqueue('lucky_duke_draw', nameForSeat(e.actor_seat));
+      continue;
+    }
     if (abilityTypes.includes(e.event_type as AbilityAnimationType)) {
       abilityQueue.enqueue(e.event_type as AbilityAnimationType, nameForSeat(e.actor_seat), e.target_seat != null ? nameForSeat(e.target_seat) : undefined);
     }
+
   }
 }, [events]);
 

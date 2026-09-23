@@ -146,8 +146,11 @@ export default function OfflineGameScreen({ engine, onLeave }: { engine: Offline
 
   useEffect(() => {
     const events = state.events;
-    const abilityTypes: AbilityAnimationType[] = ['bart_cassidy_draw', 'el_gringo_steal', 'sid_ketchum_heal', 'vulture_sam_loot'];
-
+    const abilityTypes: AbilityAnimationType[] = [
+      'bart_cassidy_draw', 'el_gringo_steal', 'sid_ketchum_heal', 'vulture_sam_loot',
+      'suzy_lafayette_draw', 'black_jack_bonus_draw', 'jesse_jones_steal',
+      'pedro_ramirez_discard_draw', 'kit_carlson_pick',
+    ];
     // Premier passage : on mémorise ce qui existe déjà (reconnexion en cours de partie)
     // sans rejouer d'animation pour des capacités déjà anciennes.
     if (seenAbilityEventIds.current === null) {
@@ -158,6 +161,13 @@ export default function OfflineGameScreen({ engine, onLeave }: { engine: Offline
     for (const e of events) {
       if (seenAbilityEventIds.current.has(e.id)) continue;
       seenAbilityEventIds.current.add(e.id);
+
+      // Lucky Duke : même événement que n'importe quel dégainer, distingué uniquement
+      // par la présence d'une 2e carte tirée (drawnSuit2) — jamais renseignée ailleurs.
+      if (e.eventType === 'degainer_draw' && e.drawnSuit2 != null) {
+        abilityQueue.enqueue('lucky_duke_draw', nameForSeat(e.actorSeat));
+        continue;
+      }
       if (abilityTypes.includes(e.eventType as AbilityAnimationType)) {
         abilityQueue.enqueue(e.eventType as AbilityAnimationType, nameForSeat(e.actorSeat), e.targetSeat != null ? nameForSeat(e.targetSeat) : undefined);
       }
