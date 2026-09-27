@@ -1,4 +1,5 @@
 import { supabaseAdmin } from './supabaseAdmin.ts';
+import { touchTurnActivity } from './turnActivity.ts';
 
 export async function startPending(
   gameId: string,
@@ -17,6 +18,7 @@ export async function startPending(
     pending_expires_at: new Date(Date.now() + timeoutMs).toISOString(),
     pending_event_id: pendingEventId ?? null,
   }).eq('id', gameId);
+  await touchTurnActivity(gameId);
 }
 
 export async function clearPending(gameId: string) {

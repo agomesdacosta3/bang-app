@@ -1,5 +1,6 @@
 import { Pressable, Text, StyleSheet, ViewStyle } from 'react-native';
 import { colors, fonts } from '../theme';
+import { playUiSound } from '../lib/sound';
 
 type Props = {
   title: string;
@@ -17,9 +18,14 @@ const BG_BY_VARIANT: Record<string, string> = {
 };
 
 export default function WoodButton({ title, onPress, disabled, variant = 'default', style }: Props) {
+  function handlePress() {
+    playUiSound('button_tap');
+    onPress();
+  }
+
   return (
     <Pressable
-      onPress={onPress}
+      onPress={handlePress}
       disabled={disabled}
       style={({ pressed }) => [
         styles.button,

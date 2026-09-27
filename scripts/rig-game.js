@@ -18,10 +18,10 @@ const TOTAL_PLAYERS = 4; // ajustable entre 4 et 7 — le script complète avec 
 
 // Édite ici : seat_position -> { role?, character?, hand?, inPlay?, life?, forcedAction? }
 const RIG = {
-    0: { character: 'kit_carlson' },
-    1: { character: 'el_gringo'},
+    // 0: { character: 'kit_carlson' },
+    // 1: { character: 'el_gringo'},
     // 2: { character: 'bart_cassidy' },
-    3: { character: 'vulture_sam'}
+    // 3: { character: 'vulture_sam'}
 };
 
 const BOT_NICKNAMES = ['Bot 1', 'Bot 2', 'Bot 3'];

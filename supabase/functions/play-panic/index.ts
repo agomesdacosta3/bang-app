@@ -5,6 +5,7 @@ import { corsHeaders } from '../_shared/cors.ts';
 import { buildDistanceFlags } from '../_shared/distanceFlags.ts';
 import { logEvent } from '../_shared/events.ts';
 import { checkSuzyLafayette } from '../_shared/characters.ts';  
+import { touchTurnActivity } from '../_shared/turnActivity.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -54,6 +55,7 @@ serve(async (req) => {
     await supabaseAdmin.from('hand_cards').delete().eq('id', panicCard.id);
     await supabaseAdmin.from('discard_pile').insert({ game_id: gameId, card_type: 'panic', suit: panicCard.suit, value: panicCard.value });
     await logEvent(gameId, 'panic_played', { actorSeat: me.seat_position, targetSeat: target.seat_position, cardType: stolenCardType });
+    await touchTurnActivity(gameId);
 
     return new Response(JSON.stringify({ ok: true, stolenCardType }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {

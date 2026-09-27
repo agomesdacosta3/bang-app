@@ -12,7 +12,7 @@ import WoodButton from '../components/WoodButton';
 import PlayingCard from '../components/PlayingCard';
 import AbilityAnimationOverlay, { AbilityAnimationType } from '../components/AbilityAnimationOverlay';
 import { useAbilityAnimationQueue } from '../hooks/useAbilityAnimationQueue';
-
+import { playSoundForGameEvent, playAbilitySound, playUiSound, playGameSound, playMusic, stopCardSound } from '../lib/sound';
 type Game = {
   id: string; status: string; current_player_id: string | null; turn_phase: string | null;
   pending_type: string | null; pending_initiator_id: string | null; pending_expires_at: string | null;
@@ -87,6 +87,9 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
   const historyScrollRef = useRef<ScrollView>(null);
   const abilityQueue = useAbilityAnimationQueue();
   const seenAbilityEventIds = useRef<Set<string> | null>(null);
+  const prevPendingTypeRef = useRef<string | null>(null);
+
+  const finishedSoundPlayedRef = useRef(false);
 
   const me = players.find(p => p.id === playerId);
   const isMyTurn = game?.current_player_id === playerId;
@@ -156,6 +159,9 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
       case 'sid_ketchum_heal': return <>{actor} défausse 2 cartes, +1 PV</>;
       case 'beer_saved_from_death': return <>{actor} survit grâce à une {card('beer')} !</>;
       case 'degainer_draw': return <>{actor} dégaine</>;
+      case 'stagecoach_played': return <>{actor} joue {card('stagecoach')}</>;
+      case 'wellsfargo_played': return <>{actor} joue {card('wells_fargo')}</>;
+      case 'turn_auto_passed': return <>{actor} passe automatiquement (inactivité)</>;
       default: return <>{actor} — {e.event_type}</>;
     }
   }
@@ -329,35 +335,52 @@ export default function GameScreen({ gameId, playerId, onLeave }: { gameId: stri
     }
   }, [isMyTurn, game?.turn_phase]);
 
-useEffect(() => {
-  const abilityTypes: AbilityAnimationType[] = [
-  'bart_cassidy_draw', 'el_gringo_steal', 'sid_ketchum_heal', 'vulture_sam_loot',
-  'suzy_lafayette_draw', 'black_jack_bonus_draw', 'jesse_jones_steal',
-  'pedro_ramirez_discard_draw', 'kit_carlson_pick',
-];
-
-  // Premier passage : on mémorise ce qui existe déjà (reconnexion en cours de partie)
-  // sans rejouer d'animation pour des capacités déjà anciennes.
-  if (seenAbilityEventIds.current === null) {
-    seenAbilityEventIds.current = new Set(events.map(e => e.id));
-    return;
-  }
-
-  for (const e of events) {
-    if (seenAbilityEventIds.current.has(e.id)) continue;
-    seenAbilityEventIds.current.add(e.id);
-    // Lucky Duke : même événement que n'importe quel dégainer, distingué uniquement
-    // par la présence d'une 2e carte tirée (drawn_suit_2) — jamais renseignée ailleurs.
-    if (e.event_type === 'degainer_draw' && e.drawn_suit_2 != null) {
-      abilityQueue.enqueue('lucky_duke_draw', nameForSeat(e.actor_seat));
-      continue;
+  useEffect(() => {
+    const currentType = game?.pending_type ?? null;
+    if (prevPendingTypeRef.current === 'duel_response' && currentType !== 'duel_response') {
+      stopCardSound('duel');
     }
-    if (abilityTypes.includes(e.event_type as AbilityAnimationType)) {
-      abilityQueue.enqueue(e.event_type as AbilityAnimationType, nameForSeat(e.actor_seat), e.target_seat != null ? nameForSeat(e.target_seat) : undefined);
+    prevPendingTypeRef.current = currentType;
+  }, [game?.pending_type]);
+
+  useEffect(() => {
+    const abilityTypes: AbilityAnimationType[] = [
+      'bart_cassidy_draw', 'el_gringo_steal', 'sid_ketchum_heal', 'vulture_sam_loot',
+      'suzy_lafayette_draw', 'black_jack_bonus_draw', 'jesse_jones_steal',
+      'pedro_ramirez_discard_draw', 'kit_carlson_pick',
+    ];
+
+    // Premier passage : on mémorise ce qui existe déjà (reconnexion en cours de partie)
+    // sans rejouer d'animation pour des capacités déjà anciennes.
+    if (seenAbilityEventIds.current === null) {
+      seenAbilityEventIds.current = new Set(events.map(e => e.id));
+      return;
     }
 
-  }
-}, [events]);
+    for (const e of events) {
+      if (seenAbilityEventIds.current.has(e.id)) continue;
+      seenAbilityEventIds.current.add(e.id);
+
+      // Une élimination qui met fin à la partie n'a pas besoin de son ni d'animation propres :
+      // le son de victoire/défaite qui suit immédiatement suffit.
+      if (game?.status === 'finished') {
+        if (e.event_type !== 'player_eliminated') playSoundForGameEvent(e.event_type, e.card_type);
+        continue;
+      }
+
+      if (e.event_type === 'degainer_draw' && e.drawn_suit_2 != null) {
+        abilityQueue.enqueue('lucky_duke_draw', nameForSeat(e.actor_seat));
+        playAbilitySound('lucky_duke_draw');
+        continue;
+      }
+      if (abilityTypes.includes(e.event_type as AbilityAnimationType)) {
+        abilityQueue.enqueue(e.event_type as AbilityAnimationType, nameForSeat(e.actor_seat), e.target_seat != null ? nameForSeat(e.target_seat) : undefined);
+        playAbilitySound(e.event_type);
+      } else {
+        playSoundForGameEvent(e.event_type, e.card_type);
+      }
+    }
+  }, [events, game?.status]);
 
   async function runAction(action: () => Promise<void>) {
     if (actionLoadingRef.current) return;
@@ -367,6 +390,7 @@ useEffect(() => {
       await action();
       await loadAll();
     } catch (err: any) {
+      playUiSound('action_invalid');
       Alert.alert('Erreur', err.message);
     } finally {
       actionLoadingRef.current = false;
@@ -375,7 +399,7 @@ useEffect(() => {
   }
 
   const handleDegainer = () => runAction(() => callFunction('resolve-start-of-turn', { gameId }));
-  const handleDraw = () => runAction(() => callFunction('draw-cards', { gameId }));
+  const handleDraw = () => { playGameSound('turn_draw'); return runAction(() => callFunction('draw-cards', { gameId })); };
   const handleDrawJesseSteal = (targetPlayerId: string) => {
     setJesseTargetPicker(false);
     return runAction(() => callFunction('draw-jesse-steal', { gameId, targetPlayerId }));
@@ -485,6 +509,7 @@ useEffect(() => {
   function handleConfirmEndTurn() {
     const excess = hand.length - (me?.life_points ?? 0);
     if (excess > 0 && selectedDiscards.length !== excess) { Alert.alert('Défausse incomplète', `Sélectionne exactement ${excess} carte(s).`); return; }
+    playGameSound('turn_discard');
     return runAction(async () => {
       await callFunction('discard-cards', { gameId, cardIds: selectedDiscards });
       setDiscarding(false);
@@ -557,6 +582,11 @@ useEffect(() => {
       (game.winner_team === 'outlaws' && myRoleFinal === 'outlaw') ||
       (game.winner_team === 'renegade' && myRoleFinal === 'renegade');
     const teamLabel = winnerTeamLabels[game.winner_team ?? ''] ?? game.winner_team;
+    if (!finishedSoundPlayedRef.current) {
+      finishedSoundPlayedRef.current = true;
+      playGameSound(iWon ? 'victory' : 'defeat');
+      playMusic('menu');
+    }
     return (
       <View style={styles.centerContainer}>
         <Text style={[styles.title, { color: iWon ? colors.sage : colors.blood }]}>{iWon ? 'Victoire !' : 'Défaite'}</Text>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Alert, Modal, ScrollView } from 'react-native';
 import { OfflineEngine } from '../offline/engine';
 import { aiPlayFullTurn, aiRespondSingleAttack, aiRespondDuel, aiRespondIndians, aiRespondCatBalou, aiRespondGeneralStore } from '../offline/ai';
+import { playSoundForGameEvent, playAbilitySound, playGameSound, stopCardSound, stopGameSound, playMusic } from '../lib/sound';
 import { OfflineGameState } from '../offline/types';
 import { WEAPON_TYPES, getWeaponRange } from '../lib/weapons';
 import { colors, fonts, cardLabels, equipmentTags, roleLabels, roleObjectives, winnerTeamLabels, characterLabels, characterDescriptions, renderPips, suitLabels } from '../theme';
@@ -9,6 +10,7 @@ import WoodButton from '../components/WoodButton';
 import PlayingCard from '../components/PlayingCard';
 import AbilityAnimationOverlay, { AbilityAnimationType } from '../components/AbilityAnimationOverlay';
 import { useAbilityAnimationQueue } from '../hooks/useAbilityAnimationQueue';
+
 
 type Player = OfflineGameState['players'][number];
 
@@ -164,12 +166,24 @@ export default function OfflineGameScreen({ engine, onLeave }: { engine: Offline
 
       // Lucky Duke : même événement que n'importe quel dégainer, distingué uniquement
       // par la présence d'une 2e carte tirée (drawnSuit2) — jamais renseignée ailleurs.
+      // Une élimination qui met fin à la partie n'a pas besoin de son ni d'animation propres :
+      // le son de victoire/défaite qui suit immédiatement suffit, et l'écran de fin remplace
+      // de toute façon l'écran de jeu (l'animation ne serait plus visible).
+      if (state.status === 'finished') {
+        if (e.eventType !== 'player_eliminated') playSoundForGameEvent(e.eventType, e.cardType);
+        continue;
+      }
+
       if (e.eventType === 'degainer_draw' && e.drawnSuit2 != null) {
         abilityQueue.enqueue('lucky_duke_draw', nameForSeat(e.actorSeat));
+        playAbilitySound('lucky_duke_draw');
         continue;
       }
       if (abilityTypes.includes(e.eventType as AbilityAnimationType)) {
         abilityQueue.enqueue(e.eventType as AbilityAnimationType, nameForSeat(e.actorSeat), e.targetSeat != null ? nameForSeat(e.targetSeat) : undefined);
+        playAbilitySound(e.eventType);
+      } else {
+        playSoundForGameEvent(e.eventType, e.cardType);
       }
     }
   }, [state.events]);
@@ -253,6 +267,30 @@ export default function OfflineGameScreen({ engine, onLeave }: { engine: Offline
     }
   }
 
+  useEffect(() => {
+    if (state.status !== 'finished') return;
+    const iWon =
+      (state.winnerTeam === 'sheriff' && (me.role === 'sheriff' || me.role === 'deputy')) ||
+      (state.winnerTeam === 'outlaws' && me.role === 'outlaw') ||
+      (state.winnerTeam === 'renegade' && me.role === 'renegade');
+    playGameSound(iWon ? 'victory' : 'defeat');
+    playMusic('menu');
+  }, [state.status]);
+
+  const prevPendingTypeRef = useRef<string | null>(null);
+  useEffect(() => {
+    const currentType = state.pending?.type ?? null;
+    if (prevPendingTypeRef.current === 'duel_response' && currentType !== 'duel_response') {
+      stopCardSound('duel');
+    }
+    prevPendingTypeRef.current = currentType;
+  }, [state.pending?.type]);
+
+  useEffect(() => {
+    stopGameSound('victory');
+    stopGameSound('defeat');
+  }, []);
+
   if (state.status === 'finished') {
     const iWon =
       (state.winnerTeam === 'sheriff' && (me.role === 'sheriff' || me.role === 'deputy')) ||
@@ -331,6 +369,7 @@ export default function OfflineGameScreen({ engine, onLeave }: { engine: Offline
   }
   function handleConfirmEndTurn() {
     if (excess > 0 && selectedDiscards.length !== excess) { Alert.alert('Défausse incomplète', `Sélectionne exactement ${excess} carte(s).`); return; }
+    playGameSound('turn_discard');
     runAction(() => engineRef.current.discardCards(humanId, selectedDiscards));
     setDiscarding(false); setSelectedDiscards([]);
   }
@@ -537,13 +576,13 @@ export default function OfflineGameScreen({ engine, onLeave }: { engine: Offline
 
       {canDraw && me.character === 'jesse_jones' && (
         <>
-          <WoodButton title="Piocher normalement" onPress={() => runAction(() => engineRef.current.drawCards(humanId))} style={styles.fullWidthBtn} />
+          <WoodButton title="Piocher normalement" onPress={() => { playGameSound('turn_draw'); runAction(() => engineRef.current.drawCards(humanId)); }} style={styles.fullWidthBtn} />
           <WoodButton title="Piocher dans la main d'un adversaire" onPress={() => setJesseTargetPicker(true)} disabled={jesseTargets.length === 0} style={styles.fullWidthBtn} />
         </>
       )}
       {canDraw && me.character === 'pedro_ramirez' && (
         <>
-          <WoodButton title="Piocher normalement" onPress={() => runAction(() => engineRef.current.drawCards(humanId))} style={styles.fullWidthBtn} />
+          <WoodButton title="Piocher normalement" onPress={() => { playGameSound('turn_draw'); runAction(() => engineRef.current.drawCards(humanId)); }} style={styles.fullWidthBtn} />
           <WoodButton title="Piocher depuis la défausse" onPress={() => runAction(() => engineRef.current.drawPedroDiscard(humanId))} disabled={state.discardPile.length === 0} style={styles.fullWidthBtn} />
         </>
       )}
@@ -551,7 +590,7 @@ export default function OfflineGameScreen({ engine, onLeave }: { engine: Offline
         <WoodButton title="Regarder le dessus de la pioche" onPress={handlePeekKitCarlson} style={styles.fullWidthBtn} />
       )}
       {canDraw && !['jesse_jones', 'pedro_ramirez', 'kit_carlson'].includes(me.character) && (
-        <WoodButton title="Piocher" onPress={() => runAction(() => engineRef.current.drawCards(humanId))} style={styles.fullWidthBtn} />
+        <WoodButton title="Piocher" onPress={() => { playGameSound('turn_draw'); runAction(() => engineRef.current.drawCards(humanId)); }} style={styles.fullWidthBtn} />
       )}
 
       {kitCarlsonCards && (

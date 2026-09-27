@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { logEvent } from '../_shared/events.ts';
 import { checkSuzyLafayette } from '../_shared/characters.ts';
+import { touchTurnActivity } from '../_shared/turnActivity.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -33,6 +34,7 @@ serve(async (req) => {
     await supabaseAdmin.from('players').update({ life_points: me.life_points + 1 }).eq('id', me.id);
     await logEvent(gameId, 'beer_played', { actorSeat: me.seat_position });
     await checkSuzyLafayette(gameId, me.id);
+    await touchTurnActivity(gameId);
     
     return new Response(JSON.stringify({ ok: true, newLifePoints: me.life_points + 1 }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {

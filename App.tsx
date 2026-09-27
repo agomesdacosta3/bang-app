@@ -13,6 +13,7 @@ import OfflineSetupScreen from './screens/OfflineSetupScreen';
 import OfflineGameScreen from './screens/OfflineGameScreen';
 import OfflineGameStartScreen from './screens/OfflineGameStartScreen';
 import { OfflineEngine } from './offline/engine';
+import { initSounds, playMusic } from './lib/sound';
 
 type GameState = { gameId: string; playerId: string; joinCode?: string };
 type Phase = 'home' | 'lobby' | 'preparing' | 'playing' | 'offline-setup' | 'offline-preparing' | 'offline-playing';
@@ -72,6 +73,16 @@ export default function App() {
       setReady(true);
     })();
   }, []);
+
+  useEffect(() => { initSounds(); }, []);
+
+  useEffect(() => {
+    if (phase === 'home' || phase === 'lobby' || phase === 'offline-setup' || phase === 'preparing' || phase === 'offline-preparing') {
+      playMusic('menu');
+    } else if (phase === 'playing' || phase === 'offline-playing') {
+      playMusic('game');
+    }
+  }, [phase]);
 
   if (!fontsLoaded || !ready) {
     return <SafeAreaView style={styles.container}><ActivityIndicator size="large" color={colors.leather} /></SafeAreaView>;

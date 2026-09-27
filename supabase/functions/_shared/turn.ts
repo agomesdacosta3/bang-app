@@ -1,4 +1,5 @@
 import { supabaseAdmin } from './supabaseAdmin.ts';
+import { touchTurnActivity } from './turnActivity.ts';
 
 export async function advanceTurn(gameId: string, fromPlayerId: string) {
   const { data: players } = await supabaseAdmin.from('players').select('*').eq('game_id', gameId).order('seat_position');
@@ -6,5 +7,6 @@ export async function advanceTurn(gameId: string, fromPlayerId: string) {
   const currentIndex = alive.findIndex(p => p.id === fromPlayerId);
   const next = alive[(currentIndex + 1) % alive.length];
   await supabaseAdmin.from('games').update({ current_player_id: next.id, turn_phase: 'draw' }).eq('id', gameId);
+  await touchTurnActivity(gameId);
   return next;
 }

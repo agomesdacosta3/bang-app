@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { getCharacter } from '../_shared/characters.ts';
 import { logEvent } from '../_shared/events.ts';
+import { touchTurnActivity } from '../_shared/turnActivity.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -41,6 +42,7 @@ serve(async (req) => {
     await logEvent(gameId, 'kit_carlson_pick', { actorSeat: me.seat_position });
     await supabaseAdmin.from('players').update({ has_played_bang_this_turn: false }).eq('id', me.id);
     await supabaseAdmin.from('games').update({ turn_phase: 'play' }).eq('id', gameId);
+    await touchTurnActivity(gameId);
 
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {

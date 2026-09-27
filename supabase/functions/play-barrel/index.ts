@@ -3,6 +3,7 @@ import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
 import { logEvent } from '../_shared/events.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { checkSuzyLafayette } from '../_shared/characters.ts';
+import { touchTurnActivity } from '../_shared/turnActivity.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -31,6 +32,7 @@ serve(async (req) => {
     await supabaseAdmin.from('cards_in_play').insert({ player_id: me.id, card_type: 'barrel', suit: barrelCard.suit, value: barrelCard.value });
     await logEvent(gameId, 'barrel_equipped', { actorSeat: me.seat_position });
     await checkSuzyLafayette(gameId, me.id);
+    await touchTurnActivity(gameId);
 
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {

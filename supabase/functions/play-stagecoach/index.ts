@@ -2,6 +2,8 @@ import { serve } from 'https://deno.land/std@0.224.0/http/server.ts';
 import { supabaseAdmin } from '../_shared/supabaseAdmin.ts';
 import { corsHeaders } from '../_shared/cors.ts';
 import { drawFromDeck } from '../_shared/deck.ts';
+import { logEvent } from '../_shared/events.ts';
+import { touchTurnActivity } from '../_shared/turnActivity.ts';
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
@@ -28,6 +30,9 @@ serve(async (req) => {
 
     const drawn = await drawFromDeck(gameId, 3);
     await supabaseAdmin.from('hand_cards').insert(drawn.map(c => ({ player_id: me.id, card_type: c.type, suit: c.suit, value: c.value })));
+
+    await logEvent(gameId, 'stagecoach_played', { actorSeat: me.seat_position });
+    await touchTurnActivity(gameId);
 
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (err) {

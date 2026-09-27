@@ -17,9 +17,18 @@ export async function degainer(gameId: string, playerId?: string, isFavorable?: 
       { game_id: gameId, card_type: a.type, suit: a.suit, value: a.value },
       { game_id: gameId, card_type: b.type, suit: b.suit, value: b.value },
     ]);
-    const chosen = isFavorable ? (isFavorable(a) ? a : (isFavorable(b) ? b : a)) : a;
-    const other = chosen === a ? b : a;
-    await logEvent(gameId, 'degainer_draw', { actorSeat, drawnSuit: chosen.suit, drawnValue: chosen.value, drawnSuit2: other.suit, drawnValue2: other.value, threadId });
+    const firstSucceeded = isFavorable ? isFavorable(a) : true;
+    const secondSucceeded = isFavorable ? isFavorable(b) : true;
+    const chosen = firstSucceeded ? a : (secondSucceeded ? b : a);
+    // L'animation/son de Lucky Duke ne doit se déclencher que si la 1ère carte a échoué
+    // ET que la 2e a réussi — dans les autres cas, sa capacité n'a rien changé au résultat.
+    const abilityDecisive = !firstSucceeded && secondSucceeded;
+    await logEvent(gameId, 'degainer_draw', {
+      actorSeat, drawnSuit: chosen.suit, drawnValue: chosen.value,
+      drawnSuit2: abilityDecisive ? b.suit : undefined,
+      drawnValue2: abilityDecisive ? b.value : undefined,
+      threadId,
+    });
     return chosen;
   }
 

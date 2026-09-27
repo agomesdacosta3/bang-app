@@ -171,9 +171,19 @@ export class OfflineEngine {
     if (character === 'lucky_duke') {
       const [a, b] = this.drawFromDeck(2);
       this.state.discardPile.push(a, b);
-      const chosen = isFavorable ? (isFavorable(a) ? a : (isFavorable(b) ? b : a)) : a;
-      const other = chosen === a ? b : a;
-      this.logEvent('degainer_draw', { actorSeat: this.player(playerId).seatPosition, drawnSuit: chosen.suit, drawnValue: chosen.value, drawnSuit2: other.suit, drawnValue2: other.value, threadId });
+      const firstSucceeded = isFavorable ? isFavorable(a) : true;
+      const secondSucceeded = isFavorable ? isFavorable(b) : true;
+      const chosen = firstSucceeded ? a : (secondSucceeded ? b : a);
+      // L'animation/son de Lucky Duke ne doit se déclencher que si la 1ère carte a échoué
+      // ET que la 2e a réussi — dans les autres cas, sa capacité n'a rien changé au résultat.
+      const abilityDecisive = !firstSucceeded && secondSucceeded;
+      this.logEvent('degainer_draw', {
+        actorSeat: this.player(playerId).seatPosition,
+        drawnSuit: chosen.suit, drawnValue: chosen.value,
+        drawnSuit2: abilityDecisive ? b.suit : undefined,
+        drawnValue2: abilityDecisive ? b.value : undefined,
+        threadId,
+      });
       return chosen;
     }
 
